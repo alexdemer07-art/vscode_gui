@@ -40,7 +40,7 @@ AI-провайдерам делает сам OpenCode с твоими credentia
 
 1. Поставь OpenCode CLI и выполни `opencode auth login` (или настрой провайдера
    так, как тебе удобно).
-2. Установи расширение из Marketplace: `code --install-extension demer.opencode-gui`.
+2. Установи расширение из Marketplace: `code --install-extension alexdemer07.opencode-gui`.
 3. Открой папку проекта в VS Code.
 4. Открой панель: иконка OpenCode GUI в правом сайдбаре или `Ctrl+Alt+O`
    (`Cmd+Alt+O` на Mac).
