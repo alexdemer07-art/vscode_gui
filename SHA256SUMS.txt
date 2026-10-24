@@ -1,0 +1,1 @@
+7e5e8c14ca433b50817f4b8fe331d7f96236d7a8656a3baafe9afaa8b2cbc8c0  opencode-gui-0.8.16.vsix

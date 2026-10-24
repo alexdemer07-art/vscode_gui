@@ -1,0 +1,124 @@
+{
+  "name": "opencode-gui",
+  "displayName": "OpenCode GUI",
+  "description": "Sidebar chat panel for OpenCode: streaming answers, permission approvals, diffs with accept/reject, model picker, image attachments.",
+  "version": "0.8.16",
+  "publisher": "demer",
+  "license": "MIT",
+  "icon": "resources/icon-128.png",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/alexdemer07-art/vscode_gui.git"
+  },
+  "homepage": "https://github.com/alexdemer07-art/vscode_gui#readme",
+  "bugs": {
+    "url": "https://github.com/alexdemer07-art/vscode_gui/issues"
+  },
+  "type": "module",
+  "engines": {
+    "vscode": "^1.129.0"
+  },
+  "capabilities": {
+    "untrustedWorkspaces": {
+      "supported": false,
+      "description": "The panel starts the OpenCode CLI, reads workspace files and can revert changes, so it needs a trusted workspace."
+    },
+    "virtualWorkspaces": false
+  },
+  "categories": [
+    "AI",
+    "Chat",
+    "Other"
+  ],
+  "keywords": [
+    "opencode",
+    "ai",
+    "chat",
+    "assistant",
+    "agent",
+    "llm",
+    "coding assistant",
+    "sidebar",
+    "streaming",
+    "diff"
+  ],
+  "activationEvents": [
+    "onView:opencode-gui.chatView",
+    "onCommand:opencode-gui.openPanel",
+    "onCommand:opencode-gui.addSelection",
+    "onCommand:opencode-gui.reconnect",
+    "onCommand:opencode-gui.restartServer",
+    "onCommand:opencode-gui.browserEnable",
+    "onCommand:opencode-gui.browserStart",
+    "onCommand:opencode-gui.browserStatus"
+  ],
+  "main": "./dist/extension.js",
+  "contributes": {
+    "viewsContainers": {
+      "secondarySidebar": [
+        {
+          "id": "opencode-gui",
+          "title": "OpenCode GUI",
+          "icon": "resources/icon.svg"
+        }
+      ]
+    },
+    "views": {
+      "opencode-gui": [
+        {
+          "type": "webview",
+          "id": "opencode-gui.chatView",
+          "name": "Chat"
+        }
+      ]
+    },
+    "commands": [
+      {
+        "command": "opencode-gui.openPanel",
+        "title": "OpenCode GUI: Open Chat Panel"
+      },
+      {
+        "command": "opencode-gui.addSelection",
+        "title": "OpenCode GUI: Add Selection to Chat"
+      },
+      {
+        "command": "opencode-gui.reconnect",
+        "title": "OpenCode GUI: Reconnect to Server"
+      },
+      {
+        "command": "opencode-gui.restartServer",
+        "title": "OpenCode GUI: Restart Server"
+      },
+      {
+        "command": "opencode-gui.browserEnable",
+        "title": "OpenCode GUI: Enable Browser Tools"
+      },
+      {
+        "command": "opencode-gui.browserStart",
+        "title": "OpenCode GUI: Start Browser Tools"
+      },
+      {
+        "command": "opencode-gui.browserStatus",
+        "title": "OpenCode GUI: Browser Tools Status"
+      }
+    ],
+    "keybindings": [
+      {
+        "command": "opencode-gui.openPanel",
+        "key": "ctrl+alt+o",
+        "mac": "cmd+alt+o",
+        "when": "editorTextFocus"
+      }
+    ],
+    "configuration": {
+      "title": "OpenCode GUI",
+      "properties": {
+        "opencode-gui.browser.allowPrivateNetworks": {
+          "type": "boolean",
+          "default": false,
+          "markdownDescription": "Allow Browser Tools to open `localhost` and private network addresses. Off by default: a page can prompt-inject the agent into reading local services. Reload the window after changing it (the browser bridge reads the policy when it starts)."
+        }
+      }
+    }
+  }
+}
