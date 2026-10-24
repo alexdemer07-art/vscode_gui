@@ -1,1 +1,1 @@
-04ebaaf3b680b65a64a7827c61bf0aad0c1f22332491d47eeb2beb10974a350a  opencode-gui-0.8.16.vsix
+61fd1fa75abe862aba6b10f9cc8266cbd179f20b0b59b91615a6dd5eff032cf0  opencode-gui-0.8.16.vsix

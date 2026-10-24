@@ -38,19 +38,33 @@ AI-провайдерам делает сам OpenCode с твоими credentia
 
 ## Установка
 
-1. Поставь OpenCode CLI и выполни `opencode auth login` (или настрой провайдера
-   так, как тебе удобно).
-2. Установи расширение из Marketplace: `code --install-extension alexdemer07.opencode-gui`.
-3. Открой папку проекта в VS Code.
-4. Открой панель: иконка OpenCode GUI в правом сайдбаре или `Ctrl+Alt+O`
+1. Скачай и установи VSIX из последнего GitHub-релиза.
+
+   Windows (PowerShell):
+
+   ```powershell
+   Invoke-WebRequest https://github.com/alexdemer07-art/vscode_gui/releases/latest/download/opencode-gui.vsix -OutFile opencode-gui.vsix
+   code --install-extension opencode-gui.vsix
+   ```
+
+   macOS / Linux:
+
+   ```bash
+   curl -L -o opencode-gui.vsix https://github.com/alexdemer07-art/vscode_gui/releases/latest/download/opencode-gui.vsix
+   code --install-extension opencode-gui.vsix
+   ```
+
+   Или клонируй репозиторий и поставь VSIX прямо из него:
+
+   ```bash
+   git clone https://github.com/alexdemer07-art/vscode_gui.git
+   code --install-extension vscode_gui/opencode-gui-0.8.16.vsix
+   ```
+
+2. Открой папку проекта в VS Code.
+3. Открой панель: иконка OpenCode GUI в правом сайдбаре или `Ctrl+Alt+O`
    (`Cmd+Alt+O` на Mac).
-5. Нажми `+`, напиши сообщение и отправь.
-
-Если ставишь вручную из VSIX, он лежит в корне этого репозитория:
-
-```bash
-code --install-extension opencode-gui-0.8.16.vsix
-```
+4. Нажми `+`, напиши сообщение и отправь.
 
 Если CLI не найден, статус-бар покажет `offline` — проверь установку и нажми
 команду **OpenCode GUI: Reconnect**.
