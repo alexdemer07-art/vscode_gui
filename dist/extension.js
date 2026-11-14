@@ -29,7 +29,7 @@ var init_contract_9rqn6x4v = __esm({
   }
 });
 
-// ../../node_modules/@opencode/client/dist/chunks/contract-frbwqjmf.js
+// ../../node_modules/@opencode/client/dist/chunks/contract-gecjxyvt.js
 function make7(connect) {
   let current;
   const capacity = 4096;
@@ -78,6 +78,8 @@ function make7(connect) {
           let started = false;
           let completion;
           let connection;
+          const types = options?.types?.length ? new Set(options.types) : void 0;
+          const selected = (value) => !types || value.type === "server.connected" || types.has(value.type);
           function finish(result, discard = true) {
             completion = result;
             if (discard)
@@ -102,6 +104,8 @@ function make7(connect) {
             },
             push(value) {
               if (completion)
+                return;
+              if (!selected(value))
                 return;
               const request = pending.shift();
               if (request) {
@@ -164,8 +168,8 @@ function make7(connect) {
   };
 }
 var exports_shared_events;
-var init_contract_frbwqjmf = __esm({
-  "../../node_modules/@opencode/client/dist/chunks/contract-frbwqjmf.js"() {
+var init_contract_gecjxyvt = __esm({
+  "../../node_modules/@opencode/client/dist/chunks/contract-gecjxyvt.js"() {
     init_contract_9rqn6x4v();
     exports_shared_events = {};
     __export2(exports_shared_events, {
@@ -191,7 +195,7 @@ var init_contract_nwcpakzx = __esm({
   }
 });
 
-// ../../node_modules/@opencode/client/dist/chunks/contract-n8g24fq8.js
+// ../../node_modules/@opencode/client/dist/chunks/contract-qdgaygb4.js
 function make6(options) {
   const fetch2 = options.fetch ?? globalThis.fetch;
   const prepare = (descriptor, requestOptions) => {
@@ -201,21 +205,21 @@ function make6(options) {
     const url = new URL(descriptor.path.slice(1), baseUrl);
     for (const [key, value] of Object.entries(descriptor.query ?? {}))
       appendQuery(url.searchParams, key, value);
-    const headers2 = new Headers(options.headers);
+    const headers = new Headers(options.headers);
     for (const [key, value] of Object.entries(descriptor.headers ?? {})) {
       if (value !== void 0 && value !== null)
-        headers2.set(key, String(value));
+        headers.set(key, String(value));
     }
     for (const [key, value] of new Headers(requestOptions?.headers))
-      headers2.set(key, value);
-    if (descriptor.body !== void 0 && !headers2.has("content-type"))
-      headers2.set("content-type", descriptor.binaryBody ? "application/octet-stream" : "application/json");
+      headers.set(key, value);
+    if (descriptor.body !== void 0 && !headers.has("content-type"))
+      headers.set("content-type", descriptor.binaryBody ? "application/octet-stream" : "application/json");
     return {
       url,
       init: {
         method: descriptor.method,
         signal: requestOptions?.signal,
-        headers: headers2,
+        headers,
         body: descriptor.body === void 0 ? void 0 : descriptor.binaryBody ? descriptor.body : JSON.stringify(descriptor.body)
       }
     };
@@ -327,7 +331,7 @@ function make6(options) {
       }
     }
   });
-  return {
+  const client = {
     server: {
       info: (requestOptions) => request({ method: "GET", path: `/api/info`, successStatus: 200, declaredStatuses: [400, 401], empty: false }, requestOptions),
       pair: (requestOptions) => request({ method: "POST", path: `/api/pair`, successStatus: 200, declaredStatuses: [400, 401], empty: false }, requestOptions),
@@ -345,7 +349,7 @@ function make6(options) {
         path: `/api/location`,
         query: { location: input?.["location"] },
         successStatus: 200,
-        declaredStatuses: [400, 401],
+        declaredStatuses: [400, 401, 404],
         empty: false
       }, requestOptions),
       reload: (requestOptions) => request({
@@ -362,7 +366,7 @@ function make6(options) {
         path: `/api/agent`,
         query: { location: input?.["location"] },
         successStatus: 200,
-        declaredStatuses: [400, 401],
+        declaredStatuses: [400, 401, 404],
         empty: false
       }, requestOptions),
       get: (input, requestOptions) => request({
@@ -380,7 +384,15 @@ function make6(options) {
         path: `/api/plugin`,
         query: { location: input?.["location"] },
         successStatus: 200,
-        declaredStatuses: [400, 401],
+        declaredStatuses: [400, 401, 404],
+        empty: false
+      }, requestOptions),
+      gui: (input, requestOptions) => request({
+        method: "GET",
+        path: `/api/plugin/gui`,
+        query: { location: input["location"], id: input["id"] },
+        successStatus: 200,
+        declaredStatuses: [400, 401, 404],
         empty: false
       }, requestOptions),
       check: (input, requestOptions) => request({
@@ -389,7 +401,7 @@ function make6(options) {
         query: { location: input?.["location"] },
         body: { target: input?.["target"] },
         successStatus: 200,
-        declaredStatuses: [400, 401],
+        declaredStatuses: [400, 401, 404],
         empty: false
       }, requestOptions),
       update: (input, requestOptions) => request({
@@ -398,7 +410,7 @@ function make6(options) {
         query: { location: input["location"] },
         body: { targets: input["targets"] },
         successStatus: 204,
-        declaredStatuses: [400, 401, 503],
+        declaredStatuses: [400, 401, 404, 503],
         empty: true
       }, requestOptions)
     },
@@ -411,6 +423,7 @@ function make6(options) {
           order: input?.["order"],
           search: input?.["search"],
           parentID: input?.["parentID"],
+          archived: input?.["archived"],
           directory: input?.["directory"],
           project: input?.["project"],
           subpath: input?.["subpath"],
@@ -420,25 +433,12 @@ function make6(options) {
         declaredStatuses: [400, 401],
         empty: false
       }, requestOptions),
-      stats: (input, requestOptions) => request({
-        method: "GET",
-        path: `/api/experimental/session/stats`,
-        query: {
-          from: input?.["from"],
-          to: input?.["to"],
-          project: input?.["project"],
-          timezone: input?.["timezone"],
-          tools: input?.["tools"]
-        },
-        successStatus: 200,
-        declaredStatuses: [400, 401],
-        empty: false
-      }, requestOptions).then((value) => value.data),
       create: (input, requestOptions) => request({
         method: "POST",
         path: `/api/session`,
         body: {
           id: input?.["id"],
+          parentID: input?.["parentID"],
           title: input?.["title"],
           agent: input?.["agent"],
           model: input?.["model"],
@@ -447,23 +447,7 @@ function make6(options) {
           permissions: input?.["permissions"]
         },
         successStatus: 200,
-        declaredStatuses: [400, 401],
-        empty: false
-      }, requestOptions).then((value) => value.data),
-      import: (input, requestOptions) => request({
-        method: "POST",
-        path: `/api/experimental/session/import`,
-        body: { info: input["info"], messages: input["messages"], location: input["location"] },
-        successStatus: 200,
-        declaredStatuses: [400, 401, 404, 409],
-        empty: false
-      }, requestOptions).then((value) => value.data),
-      export: (input, requestOptions) => request({
-        method: "GET",
-        path: `/api/experimental/session/${encodeURIComponent(input.sessionID)}/export`,
-        query: { sanitize: input["sanitize"] },
-        successStatus: 200,
-        declaredStatuses: [400, 401, 404, 500],
+        declaredStatuses: [400, 401, 404],
         empty: false
       }, requestOptions).then((value) => value.data),
       active: (requestOptions) => request({
@@ -514,7 +498,12 @@ function make6(options) {
       update: (input, requestOptions) => request({
         method: "PATCH",
         path: `/api/session/${encodeURIComponent(input.sessionID)}`,
-        body: { title: input["title"], metadata: input["metadata"], permissions: input["permissions"] },
+        body: {
+          title: input["title"],
+          metadata: input["metadata"],
+          permissions: input["permissions"],
+          archived: input["archived"]
+        },
         successStatus: 204,
         declaredStatuses: [400, 401, 404],
         empty: true
@@ -559,14 +548,6 @@ function make6(options) {
         declaredStatuses: [400, 401, 404, 500],
         empty: true
       }, requestOptions),
-      skill: (input, requestOptions) => request({
-        method: "POST",
-        path: `/api/experimental/session/${encodeURIComponent(input.sessionID)}/skill`,
-        body: { id: input["id"], resume: input["resume"] },
-        successStatus: 204,
-        declaredStatuses: [400, 401, 404],
-        empty: true
-      }, requestOptions),
       synthetic: (input, requestOptions) => request({
         method: "POST",
         path: `/api/session/${encodeURIComponent(input.sessionID)}/synthetic`,
@@ -598,13 +579,6 @@ function make6(options) {
         declaredStatuses: [400, 401, 404, 409],
         empty: false
       }, requestOptions).then((value) => value.data),
-      wait: (input, requestOptions) => request({
-        method: "POST",
-        path: `/api/experimental/session/${encodeURIComponent(input.sessionID)}/wait`,
-        successStatus: 204,
-        declaredStatuses: [400, 401, 404, 503],
-        empty: true
-      }, requestOptions),
       revert: {
         stage: (input, requestOptions) => request({
           method: "POST",
@@ -668,32 +642,6 @@ function make6(options) {
           empty: true
         }, requestOptions)
       },
-      instructions: {
-        entry: {
-          list: (input, requestOptions) => request({
-            method: "GET",
-            path: `/api/experimental/session/${encodeURIComponent(input.sessionID)}/instructions/entries`,
-            successStatus: 200,
-            declaredStatuses: [400, 401, 404],
-            empty: false
-          }, requestOptions).then((value) => value.data),
-          put: (input, requestOptions) => request({
-            method: "PUT",
-            path: `/api/experimental/session/${encodeURIComponent(input.sessionID)}/instructions/entries/${encodeURIComponent(input.key)}`,
-            body: { value: input["value"] },
-            successStatus: 204,
-            declaredStatuses: [400, 401, 404, 413],
-            empty: true
-          }, requestOptions),
-          remove: (input, requestOptions) => request({
-            method: "DELETE",
-            path: `/api/experimental/session/${encodeURIComponent(input.sessionID)}/instructions/entries/${encodeURIComponent(input.key)}`,
-            successStatus: 204,
-            declaredStatuses: [400, 401, 404],
-            empty: true
-          }, requestOptions)
-        }
-      },
       generate: (input, requestOptions) => request({
         method: "POST",
         path: `/api/session/${encodeURIComponent(input.sessionID)}/generate`,
@@ -702,14 +650,6 @@ function make6(options) {
         declaredStatuses: [400, 401, 404, 503],
         empty: false
       }, requestOptions).then((value) => value.data),
-      log: (input, requestOptions) => sse({
-        method: "GET",
-        path: `/api/experimental/session/${encodeURIComponent(input.sessionID)}/log`,
-        query: { after: input["after"], follow: input["follow"] },
-        successStatus: 200,
-        declaredStatuses: [400, 401, 404],
-        empty: false
-      }, requestOptions),
       interrupt: (input, requestOptions) => request({
         method: "POST",
         path: `/api/session/${encodeURIComponent(input.sessionID)}/interrupt`,
@@ -768,6 +708,7 @@ function make6(options) {
         cancel: (input, requestOptions) => request({
           method: "DELETE",
           path: `/api/session/${encodeURIComponent(input.sessionID)}/form/${encodeURIComponent(input.formID)}`,
+          query: { message: input["message"] },
           successStatus: 204,
           declaredStatuses: [400, 401, 404, 409],
           empty: true
@@ -790,6 +731,493 @@ function make6(options) {
         empty: true
       }, requestOptions)
     },
+    experimental: {
+      session: {
+        stats: (input, requestOptions) => request({
+          method: "GET",
+          path: `/api/experimental/session/stats`,
+          query: {
+            from: input?.["from"],
+            to: input?.["to"],
+            project: input?.["project"],
+            timezone: input?.["timezone"],
+            tools: input?.["tools"]
+          },
+          successStatus: 200,
+          declaredStatuses: [400, 401],
+          empty: false
+        }, requestOptions).then((value) => value.data),
+        import: (input, requestOptions) => request({
+          method: "POST",
+          path: `/api/experimental/session/import`,
+          body: { info: input["info"], messages: input["messages"], location: input["location"] },
+          successStatus: 200,
+          declaredStatuses: [400, 401, 404, 409],
+          empty: false
+        }, requestOptions).then((value) => value.data),
+        export: (input, requestOptions) => request({
+          method: "GET",
+          path: `/api/experimental/session/${encodeURIComponent(input.sessionID)}/export`,
+          query: { sanitize: input["sanitize"] },
+          successStatus: 200,
+          declaredStatuses: [400, 401, 404, 500],
+          empty: false
+        }, requestOptions).then((value) => value.data),
+        skill: (input, requestOptions) => request({
+          method: "POST",
+          path: `/api/experimental/session/${encodeURIComponent(input.sessionID)}/skill`,
+          body: { id: input["id"], resume: input["resume"] },
+          successStatus: 204,
+          declaredStatuses: [400, 401, 404],
+          empty: true
+        }, requestOptions),
+        wait: (input, requestOptions) => request({
+          method: "POST",
+          path: `/api/experimental/session/${encodeURIComponent(input.sessionID)}/wait`,
+          successStatus: 204,
+          declaredStatuses: [400, 401, 404, 503],
+          empty: true
+        }, requestOptions),
+        instructions: {
+          entry: {
+            list: (input, requestOptions) => request({
+              method: "GET",
+              path: `/api/experimental/session/${encodeURIComponent(input.sessionID)}/instructions/entries`,
+              successStatus: 200,
+              declaredStatuses: [400, 401, 404],
+              empty: false
+            }, requestOptions).then((value) => value.data),
+            put: (input, requestOptions) => request({
+              method: "PUT",
+              path: `/api/experimental/session/${encodeURIComponent(input.sessionID)}/instructions/entries/${encodeURIComponent(input.key)}`,
+              body: { value: input["value"] },
+              successStatus: 204,
+              declaredStatuses: [400, 401, 404, 413],
+              empty: true
+            }, requestOptions),
+            remove: (input, requestOptions) => request({
+              method: "DELETE",
+              path: `/api/experimental/session/${encodeURIComponent(input.sessionID)}/instructions/entries/${encodeURIComponent(input.key)}`,
+              successStatus: 204,
+              declaredStatuses: [400, 401, 404],
+              empty: true
+            }, requestOptions)
+          }
+        },
+        log: (input, requestOptions) => sse({
+          method: "GET",
+          path: `/api/experimental/session/${encodeURIComponent(input.sessionID)}/log`,
+          query: { after: input["after"], follow: input["follow"] },
+          successStatus: 200,
+          declaredStatuses: [400, 401, 404],
+          empty: false
+        }, requestOptions)
+      },
+      generate: {
+        text: (input, requestOptions) => request({
+          method: "POST",
+          path: `/api/experimental/generate/text`,
+          body: { prompt: input["prompt"], model: input["model"] },
+          successStatus: 200,
+          declaredStatuses: [400, 401, 404, 422, 502, 503],
+          empty: false
+        }, requestOptions).then((value) => value.data),
+        image: (input, requestOptions) => request({
+          method: "POST",
+          path: `/api/experimental/generate/image`,
+          body: {
+            model: input["model"],
+            prompt: input["prompt"],
+            images: input["images"],
+            n: input["n"],
+            aspect: input["aspect"],
+            resolution: input["resolution"]
+          },
+          successStatus: 200,
+          declaredStatuses: [400, 401, 404, 422, 502, 503],
+          empty: false
+        }, requestOptions).then((value) => value.data),
+        decisions: (input, requestOptions) => request({
+          method: "POST",
+          path: `/api/experimental/generate/decisions`,
+          body: { model: input["model"], input: input["input"], questions: input["questions"] },
+          successStatus: 200,
+          declaredStatuses: [400, 401, 404, 422, 502, 503],
+          empty: false
+        }, requestOptions).then((value) => value.data)
+      },
+      voice: {
+        models: (requestOptions) => request({
+          method: "GET",
+          path: `/api/experimental/voice/models`,
+          successStatus: 200,
+          declaredStatuses: [400, 401, 404, 503],
+          empty: false
+        }, requestOptions).then((value) => value.data),
+        session: (input, requestOptions) => request({
+          method: "POST",
+          path: `/api/experimental/voice/session`,
+          body: { model: input["model"], session: input["session"], transport: input["transport"] },
+          successStatus: 200,
+          declaredStatuses: [400, 401, 404, 503],
+          empty: false
+        }, requestOptions).then((value) => value.data)
+      },
+      integration: {
+        wellknown: {
+          add: (input, requestOptions) => request({
+            method: "POST",
+            path: `/api/experimental/integration/wellknown`,
+            query: { location: input["location"] },
+            body: { url: input["url"] },
+            successStatus: 204,
+            declaredStatuses: [400, 401, 404],
+            empty: true
+          }, requestOptions)
+        }
+      },
+      mcp: {
+        add: (input, requestOptions) => request({
+          method: "PUT",
+          path: `/api/experimental/mcp/${encodeURIComponent(input.server)}`,
+          query: { location: input["location"] },
+          body: { config: input["config"] },
+          successStatus: 204,
+          declaredStatuses: [400, 401, 404],
+          empty: true
+        }, requestOptions),
+        remove: (input, requestOptions) => request({
+          method: "DELETE",
+          path: `/api/experimental/mcp/${encodeURIComponent(input.server)}`,
+          query: { location: input["location"] },
+          successStatus: 204,
+          declaredStatuses: [400, 401, 404],
+          empty: true
+        }, requestOptions),
+        connect: (input, requestOptions) => request({
+          method: "POST",
+          path: `/api/experimental/mcp/${encodeURIComponent(input.server)}/connect`,
+          query: { location: input["location"] },
+          successStatus: 204,
+          declaredStatuses: [400, 401, 404],
+          empty: true
+        }, requestOptions),
+        disconnect: (input, requestOptions) => request({
+          method: "POST",
+          path: `/api/experimental/mcp/${encodeURIComponent(input.server)}/disconnect`,
+          query: { location: input["location"] },
+          successStatus: 204,
+          declaredStatuses: [400, 401, 404],
+          empty: true
+        }, requestOptions),
+        client: {
+          token: (input, requestOptions) => request({
+            method: "POST",
+            path: `/api/experimental/client-mcp/token`,
+            query: { location: input["location"], name: input["name"] },
+            headers: { "x-opencode-ticket": input["x-opencode-ticket"] },
+            successStatus: 200,
+            declaredStatuses: [400, 401, 403, 404],
+            empty: false
+          }, requestOptions)
+        }
+      },
+      file: {
+        write: (input, requestOptions) => request({
+          method: "POST",
+          path: `/api/experimental/fs/write`,
+          query: { location: input["location"], path: input["path"] },
+          body: input["payload"],
+          successStatus: 200,
+          declaredStatuses: [400, 401, 404],
+          empty: false,
+          binaryBody: true
+        }, requestOptions),
+        watch: (input, requestOptions) => request({
+          method: "POST",
+          path: `/api/experimental/fs/watch`,
+          query: { location: input["location"] },
+          body: { path: input["path"] },
+          successStatus: 204,
+          declaredStatuses: [400, 401, 404, 503],
+          empty: true
+        }, requestOptions),
+        unwatch: (input, requestOptions) => request({
+          method: "DELETE",
+          path: `/api/experimental/fs/watch`,
+          query: { location: input["location"] },
+          body: { path: input["path"] },
+          successStatus: 204,
+          declaredStatuses: [400, 401, 404],
+          empty: true
+        }, requestOptions)
+      },
+      persistentPty: {
+        read: (input, requestOptions) => request({
+          method: "GET",
+          path: `/api/experimental/session/${encodeURIComponent(input.sessionID)}/terminal/read`,
+          query: { lines: input["lines"] },
+          successStatus: 200,
+          declaredStatuses: [400, 401, 503],
+          empty: false
+        }, requestOptions).then((value) => value.data),
+        list: (input, requestOptions) => request({
+          method: "GET",
+          path: `/api/experimental/session/${encodeURIComponent(input.sessionID)}/terminal`,
+          successStatus: 200,
+          declaredStatuses: [400, 401, 503],
+          empty: false
+        }, requestOptions).then((value) => value.data),
+        create: (input, requestOptions) => request({
+          method: "POST",
+          path: `/api/experimental/session/${encodeURIComponent(input.sessionID)}/terminal`,
+          body: {
+            command: input["command"],
+            args: input["args"],
+            cwd: input["cwd"],
+            title: input["title"],
+            env: input["env"],
+            size: input["size"]
+          },
+          successStatus: 200,
+          declaredStatuses: [400, 401, 503],
+          empty: false
+        }, requestOptions).then((value) => value.data),
+        shutdown: (requestOptions) => request({
+          method: "POST",
+          path: `/api/experimental/persistent-pty/shutdown`,
+          successStatus: 204,
+          declaredStatuses: [400, 401, 503],
+          empty: true
+        }, requestOptions),
+        handoff: (requestOptions) => request({
+          method: "POST",
+          path: `/api/experimental/persistent-pty/handoff`,
+          successStatus: 200,
+          declaredStatuses: [400, 401, 503],
+          empty: false
+        }, requestOptions),
+        get: (input, requestOptions) => request({
+          method: "GET",
+          path: `/api/experimental/persistent-pty/${encodeURIComponent(input.ptyID)}`,
+          successStatus: 200,
+          declaredStatuses: [400, 401, 404, 503],
+          empty: false
+        }, requestOptions).then((value) => value.data),
+        update: (input, requestOptions) => request({
+          method: "PUT",
+          path: `/api/experimental/persistent-pty/${encodeURIComponent(input.ptyID)}`,
+          body: { attachmentID: input["attachmentID"], size: input["size"], title: input["title"] },
+          successStatus: 200,
+          declaredStatuses: [400, 401, 404, 501, 503],
+          empty: false
+        }, requestOptions).then((value) => value.data),
+        snapshot: (input, requestOptions) => request({
+          method: "GET",
+          path: `/api/experimental/persistent-pty/${encodeURIComponent(input.ptyID)}/snapshot`,
+          successStatus: 200,
+          declaredStatuses: [400, 401, 404, 503],
+          empty: false
+        }, requestOptions).then((value) => value.data),
+        remove: (input, requestOptions) => request({
+          method: "DELETE",
+          path: `/api/experimental/persistent-pty/${encodeURIComponent(input.ptyID)}`,
+          successStatus: 204,
+          declaredStatuses: [400, 401, 404, 503],
+          empty: true
+        }, requestOptions),
+        connectToken: (input, requestOptions) => request({
+          method: "POST",
+          path: `/api/experimental/persistent-pty/${encodeURIComponent(input.ptyID)}/connect-token`,
+          headers: { "x-opencode-ticket": input["x-opencode-ticket"] },
+          successStatus: 200,
+          declaredStatuses: [400, 401, 403, 404, 503],
+          empty: false
+        }, requestOptions).then((value) => value.data)
+      },
+      media: {
+        get: (input, requestOptions) => request({
+          method: "GET",
+          path: `/api/experimental/media/${encodeURIComponent(input.hash)}`,
+          successStatus: 200,
+          declaredStatuses: [400, 401, 404],
+          empty: false,
+          binary: true
+        }, requestOptions)
+      },
+      schedule: {
+        create: (input, requestOptions) => request({
+          method: "POST",
+          path: `/api/experimental/schedule`,
+          body: {
+            sessionID: input["sessionID"],
+            name: input["name"],
+            when: input["when"],
+            if: input["if"],
+            until: input["until"],
+            ends: input["ends"],
+            prompt: input["prompt"]
+          },
+          successStatus: 200,
+          declaredStatuses: [400, 401, 403, 404],
+          empty: false
+        }, requestOptions).then((value) => value.data),
+        list: (input, requestOptions) => request({
+          method: "GET",
+          path: `/api/experimental/schedule`,
+          query: { sessionID: input["sessionID"] },
+          successStatus: 200,
+          declaredStatuses: [400, 401, 403, 404],
+          empty: false
+        }, requestOptions).then((value) => value.data),
+        get: (input, requestOptions) => request({
+          method: "GET",
+          path: `/api/experimental/schedule/${encodeURIComponent(input.scheduleID)}`,
+          successStatus: 200,
+          declaredStatuses: [400, 401, 403, 404],
+          empty: false
+        }, requestOptions).then((value) => value.data),
+        pause: (input, requestOptions) => request({
+          method: "POST",
+          path: `/api/experimental/schedule/${encodeURIComponent(input.scheduleID)}/pause`,
+          successStatus: 200,
+          declaredStatuses: [400, 401, 403, 404],
+          empty: false
+        }, requestOptions).then((value) => value.data),
+        resume: (input, requestOptions) => request({
+          method: "POST",
+          path: `/api/experimental/schedule/${encodeURIComponent(input.scheduleID)}/resume`,
+          successStatus: 200,
+          declaredStatuses: [400, 401, 403, 404],
+          empty: false
+        }, requestOptions).then((value) => value.data),
+        delete: (input, requestOptions) => request({
+          method: "DELETE",
+          path: `/api/experimental/schedule/${encodeURIComponent(input.scheduleID)}`,
+          successStatus: 204,
+          declaredStatuses: [400, 401, 403, 404],
+          empty: true
+        }, requestOptions)
+      },
+      artifacts: {
+        providers: (input, requestOptions) => request({
+          method: "GET",
+          path: `/api/experimental/artifacts/providers`,
+          query: { location: input?.["location"] },
+          successStatus: 200,
+          declaredStatuses: [400, 401, 403, 404, 503],
+          empty: false
+        }, requestOptions),
+        list: (input, requestOptions) => request({
+          method: "GET",
+          path: `/api/experimental/artifacts`,
+          query: { location: input?.["location"], sessionID: input?.["sessionID"], provider: input?.["provider"] },
+          successStatus: 200,
+          declaredStatuses: [400, 401, 403, 404, 503],
+          empty: false
+        }, requestOptions),
+        create: (input, requestOptions) => request({
+          method: "POST",
+          path: `/api/experimental/artifacts`,
+          query: { location: input["location"] },
+          body: {
+            title: input["title"],
+            files: input["files"],
+            entry: input["entry"],
+            provider: input["provider"],
+            sessionID: input["sessionID"]
+          },
+          successStatus: 200,
+          declaredStatuses: [400, 401, 403, 404, 503],
+          empty: false
+        }, requestOptions),
+        get: (input, requestOptions) => request({
+          method: "GET",
+          path: `/api/experimental/artifacts/${encodeURIComponent(input.artifactID)}`,
+          query: { location: input["location"] },
+          successStatus: 200,
+          declaredStatuses: [400, 401, 403, 404, 503],
+          empty: false
+        }, requestOptions),
+        update: (input, requestOptions) => request({
+          method: "PATCH",
+          path: `/api/experimental/artifacts/${encodeURIComponent(input.artifactID)}`,
+          query: { location: input["location"] },
+          body: {
+            title: input["title"],
+            files: input["files"],
+            entry: input["entry"],
+            sessionID: input["sessionID"]
+          },
+          successStatus: 200,
+          declaredStatuses: [400, 401, 403, 404, 503],
+          empty: false
+        }, requestOptions),
+        delete: (input, requestOptions) => request({
+          method: "DELETE",
+          path: `/api/experimental/artifacts/${encodeURIComponent(input.artifactID)}`,
+          query: { location: input["location"] },
+          successStatus: 204,
+          declaredStatuses: [400, 401, 403, 404, 503],
+          empty: true
+        }, requestOptions),
+        view: (input, requestOptions) => request({
+          method: "GET",
+          path: `/api/experimental/artifacts/${encodeURIComponent(input.artifactID)}/view/${encodePath(input.path)}`,
+          query: { location: input["location"] },
+          successStatus: 200,
+          declaredStatuses: [400, 401, 403, 404, 503],
+          empty: false,
+          binary: true
+        }, requestOptions)
+      },
+      job: {
+        list: (input, requestOptions) => request({
+          method: "GET",
+          path: `/api/experimental/job`,
+          query: {
+            sessionID: input?.["sessionID"],
+            kind: input?.["kind"],
+            status: input?.["status"],
+            descendants: input?.["descendants"]
+          },
+          successStatus: 200,
+          declaredStatuses: [400, 401, 404],
+          empty: false
+        }, requestOptions).then((value) => value.data)
+      },
+      migration: {
+        v1: {
+          status: (requestOptions) => request({
+            method: "GET",
+            path: `/api/experimental/migration/v1`,
+            successStatus: 200,
+            declaredStatuses: [400, 401],
+            empty: false
+          }, requestOptions)
+        }
+      },
+      usage: {
+        limits: (input, requestOptions) => request({
+          method: "GET",
+          path: `/api/experimental/usage/limits`,
+          query: { location: input?.["location"] },
+          successStatus: 200,
+          declaredStatuses: [400, 401, 404, 503],
+          empty: false
+        }, requestOptions)
+      },
+      config: {
+        update: (input, requestOptions) => request({
+          method: "PATCH",
+          path: `/api/experimental/config`,
+          body: { shell: input["shell"] },
+          successStatus: 204,
+          declaredStatuses: [400, 401, 404],
+          empty: true
+        }, requestOptions)
+      }
+    },
     message: {
       list: (input, requestOptions) => request({
         method: "GET",
@@ -804,9 +1232,9 @@ function make6(options) {
       list: (input, requestOptions) => request({
         method: "GET",
         path: `/api/model`,
-        query: { location: input?.["location"] },
+        query: { location: input?.["location"], types: input?.["types"] },
         successStatus: 200,
-        declaredStatuses: [400, 401, 503],
+        declaredStatuses: [400, 401, 404, 503],
         empty: false
       }, requestOptions),
       default: (input, requestOptions) => request({
@@ -814,19 +1242,9 @@ function make6(options) {
         path: `/api/model/default`,
         query: { location: input?.["location"] },
         successStatus: 200,
-        declaredStatuses: [400, 401, 503],
+        declaredStatuses: [400, 401, 404, 503],
         empty: false
       }, requestOptions)
-    },
-    generate: {
-      text: (input, requestOptions) => request({
-        method: "POST",
-        path: `/api/experimental/generate`,
-        body: { prompt: input["prompt"], model: input["model"] },
-        successStatus: 200,
-        declaredStatuses: [400, 401, 503],
-        empty: false
-      }, requestOptions).then((value) => value.data)
     },
     provider: {
       list: (input, requestOptions) => request({
@@ -834,7 +1252,7 @@ function make6(options) {
         path: `/api/provider`,
         query: { location: input?.["location"] },
         successStatus: 200,
-        declaredStatuses: [400, 401, 503],
+        declaredStatuses: [400, 401, 404, 503],
         empty: false
       }, requestOptions),
       get: (input, requestOptions) => request({
@@ -852,7 +1270,7 @@ function make6(options) {
         path: `/api/integration`,
         query: { location: input?.["location"] },
         successStatus: 200,
-        declaredStatuses: [400, 401],
+        declaredStatuses: [400, 401, 404],
         empty: false
       }, requestOptions),
       get: (input, requestOptions) => request({
@@ -863,23 +1281,21 @@ function make6(options) {
         declaredStatuses: [400, 401, 404],
         empty: false
       }, requestOptions),
-      wellknown: {
-        add: (input, requestOptions) => request({
-          method: "POST",
-          path: `/api/experimental/integration/wellknown`,
-          query: { location: input["location"] },
-          body: { url: input["url"] },
-          successStatus: 204,
-          declaredStatuses: [400, 401],
-          empty: true
-        }, requestOptions)
-      },
       connect: {
         key: (input, requestOptions) => request({
           method: "POST",
           path: `/api/integration/${encodeURIComponent(input.integrationID)}/connect/key`,
           query: { location: input["location"] },
           body: { key: input["key"], answer: input["answer"], label: input["label"] },
+          successStatus: 204,
+          declaredStatuses: [400, 401, 404],
+          empty: true
+        }, requestOptions),
+        external: (input, requestOptions) => request({
+          method: "POST",
+          path: `/api/integration/${encodeURIComponent(input.integrationID)}/connect/external`,
+          query: { location: input["location"] },
+          body: { methodID: input["methodID"], answer: input["answer"], label: input["label"] },
           successStatus: 204,
           declaredStatuses: [400, 401, 404],
           empty: true
@@ -892,7 +1308,7 @@ function make6(options) {
           query: { location: input["location"] },
           body: { methodID: input["methodID"], answer: input["answer"], label: input["label"] },
           successStatus: 200,
-          declaredStatuses: [400, 401],
+          declaredStatuses: [400, 401, 404],
           empty: false
         }, requestOptions),
         status: (input, requestOptions) => request({
@@ -917,7 +1333,7 @@ function make6(options) {
           path: `/api/integration/${encodeURIComponent(input.integrationID)}/connect/oauth/${encodeURIComponent(input.attemptID)}`,
           query: { location: input["location"] },
           successStatus: 204,
-          declaredStatuses: [400, 401],
+          declaredStatuses: [400, 401, 404],
           empty: true
         }, requestOptions)
       },
@@ -944,7 +1360,7 @@ function make6(options) {
           path: `/api/integration/${encodeURIComponent(input.integrationID)}/connect/command/${encodeURIComponent(input.attemptID)}`,
           query: { location: input["location"] },
           successStatus: 204,
-          declaredStatuses: [400, 401],
+          declaredStatuses: [400, 401, 404],
           empty: true
         }, requestOptions)
       }
@@ -955,41 +1371,8 @@ function make6(options) {
         path: `/api/mcp`,
         query: { location: input?.["location"] },
         successStatus: 200,
-        declaredStatuses: [400, 401],
+        declaredStatuses: [400, 401, 404],
         empty: false
-      }, requestOptions),
-      add: (input, requestOptions) => request({
-        method: "PUT",
-        path: `/api/experimental/mcp/${encodeURIComponent(input.server)}`,
-        query: { location: input["location"] },
-        body: { config: input["config"] },
-        successStatus: 204,
-        declaredStatuses: [400, 401],
-        empty: true
-      }, requestOptions),
-      remove: (input, requestOptions) => request({
-        method: "DELETE",
-        path: `/api/experimental/mcp/${encodeURIComponent(input.server)}`,
-        query: { location: input["location"] },
-        successStatus: 204,
-        declaredStatuses: [400, 401, 404],
-        empty: true
-      }, requestOptions),
-      connect: (input, requestOptions) => request({
-        method: "POST",
-        path: `/api/experimental/mcp/${encodeURIComponent(input.server)}/connect`,
-        query: { location: input["location"] },
-        successStatus: 204,
-        declaredStatuses: [400, 401, 404],
-        empty: true
-      }, requestOptions),
-      disconnect: (input, requestOptions) => request({
-        method: "POST",
-        path: `/api/experimental/mcp/${encodeURIComponent(input.server)}/disconnect`,
-        query: { location: input["location"] },
-        successStatus: 204,
-        declaredStatuses: [400, 401, 404],
-        empty: true
       }, requestOptions),
       resource: {
         catalog: (input, requestOptions) => request({
@@ -997,12 +1380,27 @@ function make6(options) {
           path: `/api/mcp/resource`,
           query: { location: input?.["location"] },
           successStatus: 200,
-          declaredStatuses: [400, 401],
+          declaredStatuses: [400, 401, 404],
           empty: false
         }, requestOptions)
       }
     },
     credential: {
+      list: (requestOptions) => request({ method: "GET", path: `/api/credential`, successStatus: 200, declaredStatuses: [400, 401], empty: false }, requestOptions).then((value) => value.data),
+      create: (input, requestOptions) => request({
+        method: "POST",
+        path: `/api/credential`,
+        body: {
+          id: input["id"],
+          integrationID: input["integrationID"],
+          label: input["label"],
+          value: input["value"],
+          activate: input["activate"]
+        },
+        successStatus: 200,
+        declaredStatuses: [400, 401, 409],
+        empty: false
+      }, requestOptions).then((value) => value.data),
       update: (input, requestOptions) => request({
         method: "PATCH",
         path: `/api/credential/${encodeURIComponent(input.credentialID)}`,
@@ -1027,7 +1425,14 @@ function make6(options) {
       }, requestOptions)
     },
     project: {
-      list: (requestOptions) => request({ method: "GET", path: `/api/project`, successStatus: 200, declaredStatuses: [400, 401], empty: false }, requestOptions),
+      list: (input, requestOptions) => request({
+        method: "GET",
+        path: `/api/project`,
+        query: { archived: input?.["archived"] },
+        successStatus: 200,
+        declaredStatuses: [400, 401],
+        empty: false
+      }, requestOptions),
       update: (input, requestOptions) => request({
         method: "PATCH",
         path: `/api/project/${encodeURIComponent(input.projectID)}`,
@@ -1048,7 +1453,7 @@ function make6(options) {
         path: `/api/form`,
         query: { location: input?.["location"] },
         successStatus: 200,
-        declaredStatuses: [400, 401],
+        declaredStatuses: [400, 401, 404],
         empty: false
       }, requestOptions)
     },
@@ -1059,7 +1464,7 @@ function make6(options) {
           path: `/api/permission/request`,
           query: { location: input?.["location"] },
           successStatus: 200,
-          declaredStatuses: [400, 401],
+          declaredStatuses: [400, 401, 404],
           empty: false
         }, requestOptions)
       },
@@ -1069,7 +1474,15 @@ function make6(options) {
           path: `/api/permission/saved`,
           query: { projectID: input?.["projectID"] },
           successStatus: 200,
-          declaredStatuses: [400, 401],
+          declaredStatuses: [400, 401, 404],
+          empty: false
+        }, requestOptions).then((value) => value.data),
+        update: (input, requestOptions) => request({
+          method: "PATCH",
+          path: `/api/permission/saved/${encodeURIComponent(input.id)}`,
+          body: { action: input["action"], resource: input["resource"] },
+          successStatus: 200,
+          declaredStatuses: [400, 401, 404, 409],
           empty: false
         }, requestOptions).then((value) => value.data),
         remove: (input, requestOptions) => request({
@@ -1134,7 +1547,7 @@ function make6(options) {
         path: `/api/fs/list`,
         query: { location: input?.["location"], path: input?.["path"] },
         successStatus: 200,
-        declaredStatuses: [400, 401],
+        declaredStatuses: [400, 401, 404],
         empty: false
       }, requestOptions),
       find: (input, requestOptions) => request({
@@ -1142,18 +1555,8 @@ function make6(options) {
         path: `/api/fs/find`,
         query: { location: input["location"], query: input["query"], type: input["type"], limit: input["limit"] },
         successStatus: 200,
-        declaredStatuses: [400, 401],
+        declaredStatuses: [400, 401, 404],
         empty: false
-      }, requestOptions),
-      write: (input, requestOptions) => request({
-        method: "POST",
-        path: `/api/experimental/fs/write`,
-        query: { location: input["location"], path: input["path"] },
-        body: input["payload"],
-        successStatus: 200,
-        declaredStatuses: [400, 401],
-        empty: false,
-        binaryBody: true
       }, requestOptions)
     },
     command: {
@@ -1162,7 +1565,7 @@ function make6(options) {
         path: `/api/command`,
         query: { location: input?.["location"] },
         successStatus: 200,
-        declaredStatuses: [400, 401],
+        declaredStatuses: [400, 401, 404],
         empty: false
       }, requestOptions)
     },
@@ -1172,7 +1575,7 @@ function make6(options) {
         path: `/api/skill`,
         query: { location: input?.["location"] },
         successStatus: 200,
-        declaredStatuses: [400, 401],
+        declaredStatuses: [400, 401, 404],
         empty: false
       }, requestOptions)
     },
@@ -1183,12 +1586,19 @@ function make6(options) {
         query: { location: input["location"] },
         body: { input: input["input"] },
         successStatus: 200,
-        declaredStatuses: [400, 401, 500],
+        declaredStatuses: [400, 401, 404, 500],
         empty: false
       }, requestOptions)
     },
     event: {
-      subscribe: (requestOptions) => sse({ method: "GET", path: `/api/event`, successStatus: 200, declaredStatuses: [400, 401], empty: false }, requestOptions)
+      subscribe: (input, requestOptions) => sse({
+        method: "GET",
+        path: `/api/event`,
+        query: { types: input?.["types"] },
+        successStatus: 200,
+        declaredStatuses: [400, 401],
+        empty: false
+      }, requestOptions)
     },
     pty: {
       list: (input, requestOptions) => request({
@@ -1196,7 +1606,7 @@ function make6(options) {
         path: `/api/pty`,
         query: { location: input?.["location"] },
         successStatus: 200,
-        declaredStatuses: [400, 401],
+        declaredStatuses: [400, 401, 404],
         empty: false
       }, requestOptions),
       create: (input, requestOptions) => request({
@@ -1211,7 +1621,7 @@ function make6(options) {
           env: input?.["env"]
         },
         successStatus: 200,
-        declaredStatuses: [400, 401],
+        declaredStatuses: [400, 401, 404],
         empty: false
       }, requestOptions),
       get: (input, requestOptions) => request({
@@ -1251,98 +1661,13 @@ function make6(options) {
         }, requestOptions)
       }
     },
-    experimental: {
-      persistentPty: {
-        read: (input, requestOptions) => request({
-          method: "GET",
-          path: `/api/experimental/session/${encodeURIComponent(input.sessionID)}/terminal/read`,
-          query: { lines: input["lines"] },
-          successStatus: 200,
-          declaredStatuses: [400, 401, 503],
-          empty: false
-        }, requestOptions).then((value) => value.data),
-        list: (input, requestOptions) => request({
-          method: "GET",
-          path: `/api/experimental/session/${encodeURIComponent(input.sessionID)}/terminal`,
-          successStatus: 200,
-          declaredStatuses: [400, 401, 503],
-          empty: false
-        }, requestOptions).then((value) => value.data),
-        create: (input, requestOptions) => request({
-          method: "POST",
-          path: `/api/experimental/session/${encodeURIComponent(input.sessionID)}/terminal`,
-          body: {
-            command: input["command"],
-            args: input["args"],
-            cwd: input["cwd"],
-            title: input["title"],
-            env: input["env"],
-            size: input["size"]
-          },
-          successStatus: 200,
-          declaredStatuses: [400, 401, 503],
-          empty: false
-        }, requestOptions).then((value) => value.data),
-        shutdown: (requestOptions) => request({
-          method: "POST",
-          path: `/api/experimental/persistent-pty/shutdown`,
-          successStatus: 204,
-          declaredStatuses: [400, 401, 503],
-          empty: true
-        }, requestOptions),
-        handoff: (requestOptions) => request({
-          method: "POST",
-          path: `/api/experimental/persistent-pty/handoff`,
-          successStatus: 200,
-          declaredStatuses: [400, 401, 503],
-          empty: false
-        }, requestOptions),
-        get: (input, requestOptions) => request({
-          method: "GET",
-          path: `/api/experimental/persistent-pty/${encodeURIComponent(input.ptyID)}`,
-          successStatus: 200,
-          declaredStatuses: [400, 401, 404, 503],
-          empty: false
-        }, requestOptions).then((value) => value.data),
-        update: (input, requestOptions) => request({
-          method: "PUT",
-          path: `/api/experimental/persistent-pty/${encodeURIComponent(input.ptyID)}`,
-          body: { attachmentID: input["attachmentID"], size: input["size"] },
-          successStatus: 200,
-          declaredStatuses: [400, 401, 404, 503],
-          empty: false
-        }, requestOptions).then((value) => value.data),
-        snapshot: (input, requestOptions) => request({
-          method: "GET",
-          path: `/api/experimental/persistent-pty/${encodeURIComponent(input.ptyID)}/snapshot`,
-          successStatus: 200,
-          declaredStatuses: [400, 401, 404, 503],
-          empty: false
-        }, requestOptions).then((value) => value.data),
-        remove: (input, requestOptions) => request({
-          method: "DELETE",
-          path: `/api/experimental/persistent-pty/${encodeURIComponent(input.ptyID)}`,
-          successStatus: 204,
-          declaredStatuses: [400, 401, 404, 503],
-          empty: true
-        }, requestOptions),
-        connectToken: (input, requestOptions) => request({
-          method: "POST",
-          path: `/api/experimental/persistent-pty/${encodeURIComponent(input.ptyID)}/connect-token`,
-          headers: { "x-opencode-ticket": input["x-opencode-ticket"] },
-          successStatus: 200,
-          declaredStatuses: [400, 401, 403, 404, 503],
-          empty: false
-        }, requestOptions).then((value) => value.data)
-      }
-    },
     shell: {
       list: (input, requestOptions) => request({
         method: "GET",
         path: `/api/shell`,
         query: { location: input?.["location"] },
         successStatus: 200,
-        declaredStatuses: [400, 401],
+        declaredStatuses: [400, 401, 404],
         empty: false
       }, requestOptions),
       create: (input, requestOptions) => request({
@@ -1356,7 +1681,7 @@ function make6(options) {
           metadata: input["metadata"]
         },
         successStatus: 200,
-        declaredStatuses: [400, 401],
+        declaredStatuses: [400, 401, 404],
         empty: false
       }, requestOptions),
       get: (input, requestOptions) => request({
@@ -1380,7 +1705,7 @@ function make6(options) {
         path: `/api/shell/${encodeURIComponent(input.id)}`,
         query: { location: input["location"] },
         successStatus: 204,
-        declaredStatuses: [400, 401],
+        declaredStatuses: [400, 401, 404],
         empty: true
       }, requestOptions)
     },
@@ -1390,7 +1715,7 @@ function make6(options) {
         path: `/api/reference`,
         query: { location: input?.["location"] },
         successStatus: 200,
-        declaredStatuses: [400, 401],
+        declaredStatuses: [400, 401, 404],
         empty: false
       }, requestOptions)
     },
@@ -1435,12 +1760,20 @@ function make6(options) {
       }, requestOptions)
     },
     vcs: {
+      init: (input, requestOptions) => request({
+        method: "POST",
+        path: `/api/vcs/init`,
+        query: { location: input?.["location"], provider: input?.["provider"] },
+        successStatus: 204,
+        declaredStatuses: [400, 401, 404, 409, 501, 503],
+        empty: true
+      }, requestOptions),
       get: (input, requestOptions) => request({
         method: "GET",
         path: `/api/vcs`,
         query: { location: input?.["location"] },
         successStatus: 200,
-        declaredStatuses: [400, 401],
+        declaredStatuses: [400, 401, 404],
         empty: false
       }, requestOptions),
       base: (input, requestOptions) => request({
@@ -1448,7 +1781,7 @@ function make6(options) {
         path: `/api/vcs/base`,
         query: { location: input?.["location"] },
         successStatus: 200,
-        declaredStatuses: [400, 401, 503],
+        declaredStatuses: [400, 401, 404, 503],
         empty: false
       }, requestOptions),
       status: (input, requestOptions) => request({
@@ -1456,7 +1789,7 @@ function make6(options) {
         path: `/api/vcs/status`,
         query: { location: input?.["location"] },
         successStatus: 200,
-        declaredStatuses: [400, 401],
+        declaredStatuses: [400, 401, 404],
         empty: false
       }, requestOptions),
       branch: {
@@ -1465,20 +1798,34 @@ function make6(options) {
           path: `/api/vcs/branch`,
           query: { location: input?.["location"], search: input?.["search"], limit: input?.["limit"] },
           successStatus: 200,
-          declaredStatuses: [400, 401],
+          declaredStatuses: [400, 401, 404],
           empty: false
         }, requestOptions)
       },
       diff: (input, requestOptions) => request({
         method: "GET",
         path: `/api/vcs/diff`,
-        query: { location: input["location"], mode: input["mode"], base: input["base"], context: input["context"] },
+        query: {
+          location: input["location"],
+          mode: input["mode"],
+          base: input["base"],
+          context: input["context"],
+          untracked: input["untracked"]
+        },
         successStatus: 200,
-        declaredStatuses: [400, 401, 503],
+        declaredStatuses: [400, 401, 404, 503],
         empty: false
       }, requestOptions)
     },
     debug: {
+      heapDump: (input, requestOptions) => request({
+        method: "POST",
+        path: `/api/debug/heap-dump`,
+        query: { directory: input?.["directory"] },
+        successStatus: 200,
+        declaredStatuses: [400, 401, 500],
+        empty: false
+      }, requestOptions),
       location: {
         list: (requestOptions) => request({
           method: "GET",
@@ -1497,24 +1844,13 @@ function make6(options) {
         }, requestOptions)
       }
     },
-    migration: {
-      v1: {
-        status: (requestOptions) => request({
-          method: "GET",
-          path: `/api/experimental/migration/v1`,
-          successStatus: 200,
-          declaredStatuses: [400, 401],
-          empty: false
-        }, requestOptions)
-      }
-    },
     websearch: {
       providers: (input, requestOptions) => request({
         method: "GET",
         path: `/api/websearch/provider`,
         query: { location: input?.["location"] },
         successStatus: 200,
-        declaredStatuses: [400, 401, 503],
+        declaredStatuses: [400, 401, 404, 503],
         empty: false
       }, requestOptions),
       query: (input, requestOptions) => request({
@@ -1523,7 +1859,7 @@ function make6(options) {
         query: { location: input["location"] },
         body: { query: input["query"], providerID: input["providerID"] },
         successStatus: 200,
-        declaredStatuses: [400, 401, 503],
+        declaredStatuses: [400, 401, 404, 503],
         empty: false
       }, requestOptions)
     },
@@ -1533,18 +1869,78 @@ function make6(options) {
         path: `/api/config`,
         query: { location: input?.["location"] },
         successStatus: 200,
-        declaredStatuses: [400, 401],
+        declaredStatuses: [400, 401, 404],
         empty: false
       }, requestOptions),
-      shells: (requestOptions) => request({ method: "GET", path: `/api/config/shell`, successStatus: 200, declaredStatuses: [400, 401], empty: false }, requestOptions),
-      update: (input, requestOptions) => request({
-        method: "PATCH",
-        path: `/api/experimental/config`,
-        body: { shell: input["shell"] },
-        successStatus: 204,
-        declaredStatuses: [400, 401],
-        empty: true
+      shells: (requestOptions) => request({
+        method: "GET",
+        path: `/api/config/shell`,
+        successStatus: 200,
+        declaredStatuses: [400, 401, 404],
+        empty: false
       }, requestOptions)
+    }
+  };
+  return {
+    ...client,
+    session: {
+      ...client.session,
+      stats: client.experimental.session.stats,
+      import: client.experimental.session.import,
+      export: client.experimental.session.export,
+      skill: client.experimental.session.skill,
+      wait: client.experimental.session.wait,
+      instructions: {
+        entry: {
+          list: client.experimental.session.instructions.entry.list,
+          put: client.experimental.session.instructions.entry.put,
+          remove: client.experimental.session.instructions.entry.remove
+        }
+      },
+      log: client.experimental.session.log
+    },
+    generate: {
+      text: client.experimental.generate.text,
+      image: client.experimental.generate.image,
+      decisions: client.experimental.generate.decisions
+    },
+    voice: {
+      models: client.experimental.voice.models,
+      session: client.experimental.voice.session
+    },
+    integration: {
+      ...client.integration,
+      wellknown: {
+        add: client.experimental.integration.wellknown.add
+      }
+    },
+    mcp: {
+      ...client.mcp,
+      add: client.experimental.mcp.add,
+      remove: client.experimental.mcp.remove,
+      connect: client.experimental.mcp.connect,
+      disconnect: client.experimental.mcp.disconnect,
+      client: {
+        token: client.experimental.mcp.client.token
+      }
+    },
+    file: {
+      ...client.file,
+      write: client.experimental.file.write,
+      watch: client.experimental.file.watch,
+      unwatch: client.experimental.file.unwatch
+    },
+    migration: {
+      v1: {
+        status: client.experimental.migration.v1.status
+      }
+    },
+    usage: {
+      limits: client.experimental.usage.limits
+    },
+    config: {
+      ...client.config,
+      update: client.experimental.config.update
     }
   };
 }
@@ -1602,8 +1998,8 @@ function isContentType(response, expected) {
   return response.headers.get("content-type")?.split(";", 1)[0]?.trim().toLowerCase() === expected;
 }
 var exports_client4, maxSseEventBytes;
-var init_contract_n8g24fq8 = __esm({
-  "../../node_modules/@opencode/client/dist/chunks/contract-n8g24fq8.js"() {
+var init_contract_qdgaygb4 = __esm({
+  "../../node_modules/@opencode/client/dist/chunks/contract-qdgaygb4.js"() {
     init_contract_nwcpakzx();
     init_contract_9rqn6x4v();
     exports_client4 = {};
@@ -1614,45 +2010,55 @@ var init_contract_n8g24fq8 = __esm({
   }
 });
 
-// ../../node_modules/@opencode/client/dist/chunks/contract-4tveyqeh.js
-var isInvalidRequestError2, isUnauthorizedError2, isServiceUnavailableError2, isAgentNotFoundError2, isInvalidCursorError2, isSessionNotFoundError2, isConflictError2, isUnknownError2, isMessageNotFoundError2, isCommandNotFoundError2, isCommandExecutionError2, isSkillNotFoundError2, isSessionBusyError2, isInstructionEntryValueTooLargeError2, isFormNotFoundError2, isFormInvalidAnswerError2, isFormAlreadySettledError2, isProviderNotFoundError2, isIntegrationNotFoundError2, isIntegrationAttemptNotFoundError2, isIntegrationMethodNotFoundError2, isMcpServerNotFoundError2, isProjectNotFoundError2, isPermissionNotFoundError2, isFileNotFoundError2, isRpcError2, isRpcInternalError2, isPtyNotFoundError2, isForbiddenError2, isShellNotFoundError2, isWorktreeError2;
-var init_contract_4tveyqeh = __esm({
-  "../../node_modules/@opencode/client/dist/chunks/contract-4tveyqeh.js"() {
+// ../../node_modules/@opencode/client/dist/chunks/contract-sdjh9vmn.js
+var isInvalidRequestError2, isUnauthorizedError2, isLocationNotFoundError2, isServiceUnavailableError2, isAgentNotFoundError2, isPluginNotFoundError2, isInvalidCursorError2, isSessionNotFoundError2, isMessageNotFoundError2, isConflictError2, isCommandNotFoundError2, isCommandExecutionError2, isSessionBusyError2, isUnknownError2, isFormNotFoundError2, isFormInvalidAnswerError2, isFormAlreadySettledError2, isSkillNotFoundError2, isInstructionEntryValueTooLargeError2, isProviderNotFoundError2, isModelNotFoundError2, isUnsupportedModelError2, isProviderRequestError2, isIntegrationNotFoundError2, isIntegrationAttemptNotFoundError2, isIntegrationMethodNotFoundError2, isMcpServerNotFoundError2, isForbiddenError2, isProjectNotFoundError2, isPermissionSavedNotFoundError2, isPermissionNotFoundError2, isFileNotFoundError2, isRpcError2, isRpcInternalError2, isPtyNotFoundError2, isPtyFeatureUnsupportedError2, isScheduleNotFoundError2, isArtifactNotFoundError2, isShellNotFoundError2, isWorktreeError2, isVcsInitNotSupportedError2;
+var init_contract_sdjh9vmn = __esm({
+  "../../node_modules/@opencode/client/dist/chunks/contract-sdjh9vmn.js"() {
     isInvalidRequestError2 = (value) => typeof value === "object" && value !== null && "_tag" in value && value["_tag"] === "InvalidRequestError";
     isUnauthorizedError2 = (value) => typeof value === "object" && value !== null && "_tag" in value && value["_tag"] === "UnauthorizedError";
+    isLocationNotFoundError2 = (value) => typeof value === "object" && value !== null && "_tag" in value && value["_tag"] === "LocationNotFoundError";
     isServiceUnavailableError2 = (value) => typeof value === "object" && value !== null && "_tag" in value && value["_tag"] === "ServiceUnavailableError";
     isAgentNotFoundError2 = (value) => typeof value === "object" && value !== null && "_tag" in value && value["_tag"] === "AgentNotFoundError";
+    isPluginNotFoundError2 = (value) => typeof value === "object" && value !== null && "_tag" in value && value["_tag"] === "PluginNotFoundError";
     isInvalidCursorError2 = (value) => typeof value === "object" && value !== null && "_tag" in value && value["_tag"] === "InvalidCursorError";
     isSessionNotFoundError2 = (value) => typeof value === "object" && value !== null && "_tag" in value && value["_tag"] === "SessionNotFoundError";
-    isConflictError2 = (value) => typeof value === "object" && value !== null && "_tag" in value && value["_tag"] === "ConflictError";
-    isUnknownError2 = (value) => typeof value === "object" && value !== null && "_tag" in value && value["_tag"] === "UnknownError";
     isMessageNotFoundError2 = (value) => typeof value === "object" && value !== null && "_tag" in value && value["_tag"] === "MessageNotFoundError";
+    isConflictError2 = (value) => typeof value === "object" && value !== null && "_tag" in value && value["_tag"] === "ConflictError";
     isCommandNotFoundError2 = (value) => typeof value === "object" && value !== null && "_tag" in value && value["_tag"] === "CommandNotFoundError";
     isCommandExecutionError2 = (value) => typeof value === "object" && value !== null && "_tag" in value && value["_tag"] === "CommandExecutionError";
-    isSkillNotFoundError2 = (value) => typeof value === "object" && value !== null && "_tag" in value && value["_tag"] === "SkillNotFoundError";
     isSessionBusyError2 = (value) => typeof value === "object" && value !== null && "_tag" in value && value["_tag"] === "SessionBusyError";
-    isInstructionEntryValueTooLargeError2 = (value) => typeof value === "object" && value !== null && "_tag" in value && value["_tag"] === "InstructionEntryValueTooLargeError";
+    isUnknownError2 = (value) => typeof value === "object" && value !== null && "_tag" in value && value["_tag"] === "UnknownError";
     isFormNotFoundError2 = (value) => typeof value === "object" && value !== null && "_tag" in value && value["_tag"] === "FormNotFoundError";
     isFormInvalidAnswerError2 = (value) => typeof value === "object" && value !== null && "_tag" in value && value["_tag"] === "FormInvalidAnswerError";
     isFormAlreadySettledError2 = (value) => typeof value === "object" && value !== null && "_tag" in value && value["_tag"] === "FormAlreadySettledError";
+    isSkillNotFoundError2 = (value) => typeof value === "object" && value !== null && "_tag" in value && value["_tag"] === "SkillNotFoundError";
+    isInstructionEntryValueTooLargeError2 = (value) => typeof value === "object" && value !== null && "_tag" in value && value["_tag"] === "InstructionEntryValueTooLargeError";
     isProviderNotFoundError2 = (value) => typeof value === "object" && value !== null && "_tag" in value && value["_tag"] === "ProviderNotFoundError";
+    isModelNotFoundError2 = (value) => typeof value === "object" && value !== null && "_tag" in value && value["_tag"] === "ModelNotFoundError";
+    isUnsupportedModelError2 = (value) => typeof value === "object" && value !== null && "_tag" in value && value["_tag"] === "UnsupportedModelError";
+    isProviderRequestError2 = (value) => typeof value === "object" && value !== null && "_tag" in value && value["_tag"] === "ProviderRequestError";
     isIntegrationNotFoundError2 = (value) => typeof value === "object" && value !== null && "_tag" in value && value["_tag"] === "IntegrationNotFoundError";
     isIntegrationAttemptNotFoundError2 = (value) => typeof value === "object" && value !== null && "_tag" in value && value["_tag"] === "IntegrationAttemptNotFoundError";
     isIntegrationMethodNotFoundError2 = (value) => typeof value === "object" && value !== null && "_tag" in value && value["_tag"] === "IntegrationMethodNotFoundError";
     isMcpServerNotFoundError2 = (value) => typeof value === "object" && value !== null && "_tag" in value && value["_tag"] === "McpServerNotFoundError";
+    isForbiddenError2 = (value) => typeof value === "object" && value !== null && "_tag" in value && value["_tag"] === "ForbiddenError";
     isProjectNotFoundError2 = (value) => typeof value === "object" && value !== null && "_tag" in value && value["_tag"] === "ProjectNotFoundError";
+    isPermissionSavedNotFoundError2 = (value) => typeof value === "object" && value !== null && "_tag" in value && value["_tag"] === "PermissionSavedNotFoundError";
     isPermissionNotFoundError2 = (value) => typeof value === "object" && value !== null && "_tag" in value && value["_tag"] === "PermissionNotFoundError";
     isFileNotFoundError2 = (value) => typeof value === "object" && value !== null && "_tag" in value && value["_tag"] === "FileNotFoundError";
     isRpcError2 = (value) => typeof value === "object" && value !== null && "_tag" in value && value["_tag"] === "RpcError";
     isRpcInternalError2 = (value) => typeof value === "object" && value !== null && "_tag" in value && value["_tag"] === "RpcInternalError";
     isPtyNotFoundError2 = (value) => typeof value === "object" && value !== null && "_tag" in value && value["_tag"] === "PtyNotFoundError";
-    isForbiddenError2 = (value) => typeof value === "object" && value !== null && "_tag" in value && value["_tag"] === "ForbiddenError";
+    isPtyFeatureUnsupportedError2 = (value) => typeof value === "object" && value !== null && "_tag" in value && value["_tag"] === "PtyFeatureUnsupportedError";
+    isScheduleNotFoundError2 = (value) => typeof value === "object" && value !== null && "_tag" in value && value["_tag"] === "ScheduleNotFoundError";
+    isArtifactNotFoundError2 = (value) => typeof value === "object" && value !== null && "_tag" in value && value["_tag"] === "ArtifactNotFoundError";
     isShellNotFoundError2 = (value) => typeof value === "object" && value !== null && "_tag" in value && value["_tag"] === "ShellNotFoundError";
-    isWorktreeError2 = (value) => typeof value === "object" && value !== null && "name" in value && value["name"] === "WorktreeError";
+    isWorktreeError2 = (value) => typeof value === "object" && value !== null && "_tag" in value && value["_tag"] === "WorktreeError";
+    isVcsInitNotSupportedError2 = (value) => typeof value === "object" && value !== null && "_tag" in value && value["_tag"] === "VcsInitNotSupportedError";
   }
 });
 
-// ../../node_modules/@opencode/client/dist/chunks/contract-1tbj6z39.js
+// ../../node_modules/@opencode/client/dist/chunks/contract-xqwq6bgr.js
 function makeRpc2(raw, events) {
   return (definition) => {
     const subscribe = (name, options) => {
@@ -1726,16 +2132,16 @@ function makeRpc2(raw, events) {
 function eventType(definition, name) {
   return `rpc.${definition.id}.${name}`;
 }
-var init_contract_1tbj6z39 = __esm({
-  "../../node_modules/@opencode/client/dist/chunks/contract-1tbj6z39.js"() {
-    init_contract_4tveyqeh();
+var init_contract_xqwq6bgr = __esm({
+  "../../node_modules/@opencode/client/dist/chunks/contract-xqwq6bgr.js"() {
+    init_contract_sdjh9vmn();
   }
 });
 
-// ../../node_modules/@opencode/client/dist/chunks/contract-hg4r8g3y.js
+// ../../node_modules/@opencode/client/dist/chunks/contract-b5ykzypt.js
 function make5(options) {
   const raw = make6(options);
-  const events = make7((signal2, onActivity) => raw.event.subscribe({ signal: signal2, onActivity }));
+  const events = make7((signal2, onActivity) => raw.event.subscribe(void 0, { signal: signal2, onActivity }));
   return {
     ...raw,
     rpc: Object.assign(makeRpc2(raw, events), raw.rpc),
@@ -1743,11 +2149,11 @@ function make5(options) {
   };
 }
 var exports_client3;
-var init_contract_hg4r8g3y = __esm({
-  "../../node_modules/@opencode/client/dist/chunks/contract-hg4r8g3y.js"() {
-    init_contract_frbwqjmf();
-    init_contract_n8g24fq8();
-    init_contract_1tbj6z39();
+var init_contract_b5ykzypt = __esm({
+  "../../node_modules/@opencode/client/dist/chunks/contract-b5ykzypt.js"() {
+    init_contract_gecjxyvt();
+    init_contract_qdgaygb4();
+    init_contract_xqwq6bgr();
     init_contract_9rqn6x4v();
     exports_client3 = {};
     __export2(exports_client3, {
@@ -1757,12 +2163,55 @@ var init_contract_hg4r8g3y = __esm({
   }
 });
 
+// ../../node_modules/@opencode/client/dist/chunks/contract-mwrzahmf.js
+function mediaHashFromUri2(uri) {
+  if (!uri)
+    return;
+  return MEDIA_REF.exec(uri)?.[1];
+}
+function withMediaRefs2(api) {
+  return {
+    ...api,
+    message: {
+      ...api.message,
+      list: (input, options) => api.message.list(input, mediaRefOptions(options))
+    },
+    session: {
+      ...api.session,
+      message: {
+        ...api.session.message,
+        get: (input, options) => api.session.message.get(input, mediaRefOptions(options))
+      },
+      inbox: {
+        ...api.session.inbox,
+        list: (input, options) => api.session.inbox.list(input, mediaRefOptions(options))
+      }
+    }
+  };
+}
+function mediaRefOptions(options) {
+  if (options?.mediaRefs === false)
+    return options;
+  const headers = new Headers(options?.headers);
+  headers.set(CAPABILITIES_HEADER, MEDIA_URI_CAPABILITY);
+  return { ...options, headers };
+}
+var MEDIA_URI_CAPABILITY, CAPABILITIES_HEADER, MEDIA_REF;
+var init_contract_mwrzahmf = __esm({
+  "../../node_modules/@opencode/client/dist/chunks/contract-mwrzahmf.js"() {
+    MEDIA_URI_CAPABILITY = "experimental-media-uri";
+    CAPABILITIES_HEADER = "X-OpenCode-Capabilities";
+    MEDIA_REF = /^media:([0-9a-f]{64})$/;
+  }
+});
+
 // ../../node_modules/@opencode/client/dist/promise/index.js
 var promise_exports = {};
 __export(promise_exports, {
   ClientError: () => ClientError3,
   OpenCode: () => exports_client3,
   isAgentNotFoundError: () => isAgentNotFoundError2,
+  isArtifactNotFoundError: () => isArtifactNotFoundError2,
   isCommandExecutionError: () => isCommandExecutionError2,
   isCommandNotFoundError: () => isCommandNotFoundError2,
   isConflictError: () => isConflictError2,
@@ -1777,14 +2226,21 @@ __export(promise_exports, {
   isIntegrationNotFoundError: () => isIntegrationNotFoundError2,
   isInvalidCursorError: () => isInvalidCursorError2,
   isInvalidRequestError: () => isInvalidRequestError2,
+  isLocationNotFoundError: () => isLocationNotFoundError2,
   isMcpServerNotFoundError: () => isMcpServerNotFoundError2,
   isMessageNotFoundError: () => isMessageNotFoundError2,
+  isModelNotFoundError: () => isModelNotFoundError2,
   isPermissionNotFoundError: () => isPermissionNotFoundError2,
+  isPermissionSavedNotFoundError: () => isPermissionSavedNotFoundError2,
+  isPluginNotFoundError: () => isPluginNotFoundError2,
   isProjectNotFoundError: () => isProjectNotFoundError2,
   isProviderNotFoundError: () => isProviderNotFoundError2,
+  isProviderRequestError: () => isProviderRequestError2,
+  isPtyFeatureUnsupportedError: () => isPtyFeatureUnsupportedError2,
   isPtyNotFoundError: () => isPtyNotFoundError2,
   isRpcError: () => isRpcError2,
   isRpcInternalError: () => isRpcInternalError2,
+  isScheduleNotFoundError: () => isScheduleNotFoundError2,
   isServiceUnavailableError: () => isServiceUnavailableError2,
   isSessionBusyError: () => isSessionBusyError2,
   isSessionNotFoundError: () => isSessionNotFoundError2,
@@ -1792,16 +2248,21 @@ __export(promise_exports, {
   isSkillNotFoundError: () => isSkillNotFoundError2,
   isUnauthorizedError: () => isUnauthorizedError2,
   isUnknownError: () => isUnknownError2,
-  isWorktreeError: () => isWorktreeError2
+  isUnsupportedModelError: () => isUnsupportedModelError2,
+  isVcsInitNotSupportedError: () => isVcsInitNotSupportedError2,
+  isWorktreeError: () => isWorktreeError2,
+  mediaHashFromUri: () => mediaHashFromUri2,
+  withMediaRefs: () => withMediaRefs2
 });
 var init_promise = __esm({
   "../../node_modules/@opencode/client/dist/promise/index.js"() {
-    init_contract_hg4r8g3y();
-    init_contract_1tbj6z39();
-    init_contract_n8g24fq8();
-    init_contract_4tveyqeh();
+    init_contract_b5ykzypt();
+    init_contract_qdgaygb4();
     init_contract_nwcpakzx();
-    init_contract_frbwqjmf();
+    init_contract_gecjxyvt();
+    init_contract_mwrzahmf();
+    init_contract_xqwq6bgr();
+    init_contract_sdjh9vmn();
   }
 });
 
@@ -1813,12 +2274,13 @@ import * as path6 from "path";
 // src/opencodeClient.ts
 init_promise();
 
-// ../../node_modules/@opencode/client/dist/chunks/contract-txckps9j.js
+// ../../node_modules/@opencode/client/dist/chunks/contract-ve4aws36.js
 import { spawn } from "node:child_process";
 var stderrLimit = 8 * 1024;
 function spawnServiceContender2(command, args, env3) {
   const child = spawn(command, args, {
     detached: true,
+    windowsHide: true,
     stdio: ["ignore", "ignore", "pipe"],
     env: { ...process.env, ...env3 }
   });
@@ -1851,7 +2313,52 @@ function spawnServiceContender2(command, args, env3) {
     }
   };
 }
-function contenderFailure2(contender) {
+function contenderPool2(timing) {
+  const contenders = /* @__PURE__ */ new Set();
+  let failure;
+  let spawnDelay = timing.spawnDelay;
+  let lastSpawn = 0;
+  return {
+    failure: () => failure,
+    serviceAnswered() {
+      spawnDelay = timing.spawnDelay;
+    },
+    evict(pid) {
+      for (const item of contenders) {
+        if (item.child.pid === pid || contenderFinished2(item)) {
+          item.release();
+          contenders.delete(item);
+        }
+      }
+      failure = void 0;
+      lastSpawn = 0;
+    },
+    recruitNow() {
+      lastSpawn = Date.now() - spawnDelay;
+    },
+    reap() {
+      const finished = [...contenders].filter(contenderFinished2);
+      failure ??= finished.map(contenderFailure).find((error) => error !== void 0);
+      if (finished.some((item) => item.child.exitCode === 0))
+        spawnDelay = Math.min(spawnDelay * 2, timing.maxSpawnDelay);
+      finished.forEach((item) => contenders.delete(item));
+      return contenders.size === 0 ? failure : void 0;
+    },
+    shouldRecruit(registered2) {
+      if (lastSpawn === 0 && registered2)
+        lastSpawn = Date.now();
+      return failure === void 0 && contenders.size < 2 && Date.now() - lastSpawn >= spawnDelay;
+    },
+    add(contender) {
+      contenders.add(contender);
+      lastSpawn = Date.now();
+    },
+    releaseAll() {
+      contenders.forEach((contender) => contender.release());
+    }
+  };
+}
+function contenderFailure(contender) {
   const error = contender.error();
   if (error !== void 0)
     return error;
@@ -1895,7 +2402,91 @@ function matchesVersion2(version, options) {
   return version === options.version;
 }
 
-// ../../node_modules/@opencode/client/dist/chunks/contract-a7ekbhcb.js
+// ../../node_modules/@opencode/client/dist/chunks/contract-8ye1ye6f.js
+import { homedir } from "node:os";
+import { join } from "node:path";
+function decide2(service, options) {
+  if (!matchesVersion2(service.version, options))
+    return { _tag: "replace", pty: service.state === "ready" ? "handoff" : "clear" };
+  if (!service.compatible)
+    return fail("Background service uses an incompatible health protocol. Update this client or explicitly restart the service.");
+  if (service.state === "ready")
+    return { _tag: "reuse" };
+  if (service.state === "failed")
+    return fail("Background service failed to start");
+  return { _tag: "wait" };
+}
+function fail(message) {
+  return { _tag: "fail", error: new Error(message) };
+}
+function fallback2() {
+  return join(process.env["XDG_STATE_HOME"] ?? join(homedir(), ".local", "state"), "opencode", "service.json");
+}
+function same2(left, right) {
+  return left.id === right.id && left.version === right.version && left.url === right.url && left.pid === right.pid;
+}
+async function probeResult2(info, timeout = defaultEnsureTiming2.requestTimeout) {
+  const endpoint = {
+    url: info.url,
+    auth: info.password === void 0 ? void 0 : { type: "basic", username: "opencode", password: info.password }
+  };
+  const signal2 = AbortSignal.timeout(timeout);
+  const result = await fetch(new URL("/api/info", info.url), { headers: headers2(endpoint), signal: signal2 }).then(async (response2) => ({
+    response: response2,
+    body: response2.status === 404 ? void 0 : await response2.json()
+  })).catch(() => {
+    return;
+  });
+  if (result === void 0)
+    return { service: void 0, timedOut: signal2.aborted };
+  const response = result.response;
+  if (response.status === 404)
+    return {
+      service: {
+        info,
+        endpoint,
+        version: info.version,
+        state: "ready",
+        compatible: false
+      },
+      timedOut: false
+    };
+  const serverInfo = decodeInfo(result.body);
+  if (serverInfo === void 0)
+    return { service: void 0, timedOut: false };
+  if (serverInfo.pid !== info.pid)
+    return { service: void 0, timedOut: false };
+  if (info.version !== void 0 && serverInfo.version !== info.version)
+    return { service: void 0, timedOut: false };
+  return {
+    service: {
+      info,
+      endpoint,
+      version: serverInfo.version,
+      state: response.ok ? "ready" : response.status === 500 ? "failed" : "waiting",
+      compatible: true
+    },
+    timedOut: false
+  };
+}
+function headers2(endpoint) {
+  if (endpoint.auth === void 0)
+    return;
+  return {
+    authorization: "Basic " + Buffer.from(endpoint.auth.username + ":" + endpoint.auth.password).toString("base64")
+  };
+}
+function decodeInfo(input) {
+  if (typeof input !== "object" || input === null)
+    return;
+  if (!("version" in input) || typeof input.version !== "string")
+    return;
+  if (!("pid" in input) || typeof input.pid !== "number" || !Number.isInteger(input.pid) || input.pid < 0)
+    return;
+  return { version: input.version, pid: input.pid };
+}
+
+// ../../node_modules/@opencode/client/dist/chunks/contract-ec62es4n.js
 init_contract_9rqn6x4v();
 import { readFile, rename, rm, writeFile } from "node:fs/promises";
 var exports_pty_handoff = {};
@@ -1910,38 +2501,35 @@ async function prepare2(file, info, timeout) {
   const existing = await read(file);
   if (existing !== void 0 && existing.expiresAt > Date.now() && same(existing.source, info))
     return;
-  const { ClientError, OpenCode } = await Promise.resolve().then(() => (init_promise(), promise_exports));
+  const { OpenCode } = await Promise.resolve().then(() => (init_promise(), promise_exports));
   const client = OpenCode.make({
     baseUrl: info.url,
-    headers: info.password === void 0 ? void 0 : { authorization: "Basic " + Buffer.from(`opencode:${info.password}`).toString("base64") }
+    headers: headers2({
+      url: info.url,
+      auth: info.password === void 0 ? void 0 : { type: "basic", username: "opencode", password: info.password }
+    })
   });
-  const missing = (error) => error instanceof ClientError && error.reason === "UnexpectedStatus" && typeof error.cause === "object" && error.cause !== null && "status" in error.cause && error.cause.status === 404;
-  const result = await client.experimental.persistentPty.handoff({ signal: AbortSignal.timeout(timeout) }).then((value) => ({ value }), (cause) => ({ cause }));
-  if ("cause" in result) {
+  const handoff = await client.experimental.persistentPty.handoff({ signal: AbortSignal.timeout(timeout) }).then(parse).catch(async (cause) => {
     const concurrent = await read(file);
     if (concurrent !== void 0 && concurrent.expiresAt > Date.now() && same(concurrent.source, info))
       return;
-    if (!missing(result.cause))
-      throw new Error("Failed to prepare persistent terminals for service replacement", { cause: result.cause });
-    console.warn("Background service cannot hand off persistent terminals; shutting them down before replacement");
-    await client.experimental.persistentPty.shutdown({ signal: AbortSignal.timeout(timeout) }).catch((cause) => {
-      if (missing(cause))
-        return;
-      throw new Error("Failed to shut down persistent terminals before service replacement", { cause });
+    console.warn("Background service cannot hand off persistent terminals; shutting them down before replacement", cause);
+    await client.experimental.persistentPty.shutdown({ signal: AbortSignal.timeout(timeout) }).catch(() => {
     });
-    await publish(file, info, null);
+    return null;
+  });
+  if (handoff === void 0)
     return;
-  }
-  const body = result.value;
+  await publish(file, info, handoff).catch((cause) => console.warn("Failed to publish persistent terminal handoff", cause));
+}
+function parse(body) {
   if (typeof body !== "object" || body === null || !("handoff" in body))
     throw new Error("Invalid persistent terminal handoff response");
-  if (body.handoff === null) {
-    await publish(file, info, null);
-    return;
-  }
+  if (body.handoff === null)
+    return null;
   if (!isHandoff(body.handoff) || body.handoff.expiresAt <= Date.now())
     throw new Error("Invalid or expired persistent terminal handoff");
-  await publish(file, info, body.handoff);
+  return body.handoff;
 }
 async function publish(file, info, handoff) {
   const temporary = `${file}.pty-handoff.${crypto.randomUUID()}.tmp`;
@@ -2005,8 +2593,6 @@ function isHandoff(value) {
 
 // ../../node_modules/@opencode/client/dist/promise/service.js
 import { readFile as readFile2, rm as rm2 } from "node:fs/promises";
-import { homedir } from "node:os";
-import { join } from "node:path";
 async function discover(options = {}) {
   const found = (await registered(options.file)).service;
   if (found?.state !== "ready")
@@ -2020,11 +2606,9 @@ async function discover(options = {}) {
 async function ensure(options = {}) {
   const timing = ensureTiming2(options);
   const deadline = Date.now() + timing.promiseTimeout;
-  const contenders = /* @__PURE__ */ new Set();
+  const pool = contenderPool2(timing);
   let timeouts;
   let announced = false;
-  let lastSpawn = 0;
-  let spawnDelay = timing.spawnDelay;
   const announce = (reason, previousVersion) => {
     if (announced)
       return;
@@ -2036,7 +2620,7 @@ async function ensure(options = {}) {
     if (command === void 0)
       throw new Error("Missing service command");
     try {
-      return spawnServiceContender2(command, args, await environment2(options.file ?? fallback(), options.env));
+      return spawnServiceContender2(command, args, await environment2(options.file ?? fallback2(), options.env));
     } catch (cause) {
       throw new Error("Failed to start server", { cause });
     }
@@ -2044,7 +2628,7 @@ async function ensure(options = {}) {
   try {
     while (true) {
       if (Date.now() >= deadline)
-        throw new Error("Timed out waiting for the background service to start");
+        throw pool.failure() ?? new Error("Timed out waiting for the background service to start");
       const registration = await registered(options.file, timing.requestTimeout);
       if (registration.timedOut && registration.info !== void 0) {
         timeouts = {
@@ -2054,79 +2638,56 @@ async function ensure(options = {}) {
         if (timeouts.count >= 3) {
           announce("missing");
           console.warn("Background service is unresponsive; recovery cannot preserve persistent terminals");
-          await clear2(options.file ?? fallback());
+          await clear2(options.file ?? fallback2());
           await terminate(registration.info, options, timing);
+          pool.evict(registration.info.pid);
+          pool.recruitNow();
           timeouts = void 0;
-          lastSpawn = Date.now() - spawnDelay;
         }
       } else
         timeouts = void 0;
       if (registration.service !== void 0) {
-        spawnDelay = timing.spawnDelay;
+        pool.serviceAnswered();
         const service2 = registration.service;
-        const compatible = service2.compatible && matchesVersion2(service2.version, options);
-        if (compatible && service2.state === "ready") {
-          await complete2(options.file ?? fallback(), service2.info);
+        const decision = decide2(service2, options);
+        if (decision._tag === "fail")
+          throw decision.error;
+        if (decision._tag === "reuse") {
+          await complete2(options.file ?? fallback2(), service2.info);
           return service2.endpoint;
         }
-        if (compatible && service2.state === "failed")
-          throw new Error("Background service failed to start");
-        if (!compatible) {
+        if (decision._tag === "replace") {
           announce("version-mismatch", service2.version);
           if (service2.state !== "ready")
             console.warn("Background service is not ready; replacement cannot preserve persistent terminals");
-          await stop({
-            file: options.file,
-            pty: service2.state === "ready" ? "handoff" : "clear"
-          }).catch(() => {
+          await stop({ file: options.file, pty: decision.pty }).catch(() => {
             return;
           });
-          lastSpawn = 0;
+          pool.evict(service2.info.pid);
         }
       } else {
-        if (lastSpawn === 0 && registration.info !== void 0)
-          lastSpawn = Date.now();
-        const finished = [...contenders].filter(contenderFinished2);
-        const failure = finished.map(contenderFailure2).find((error) => error !== void 0);
-        if (finished.some((item) => item.child.exitCode === 0)) {
-          spawnDelay = Math.min(spawnDelay * 2, timing.maxSpawnDelay);
-        }
-        finished.forEach((item) => contenders.delete(item));
-        if (failure !== void 0 && contenders.size === 0)
-          throw failure;
-        if (contenders.size < 2 && Date.now() - lastSpawn >= spawnDelay) {
+        const failed = pool.reap();
+        if (failed !== void 0)
+          throw failed;
+        if (pool.shouldRecruit(registration.info !== void 0)) {
           announce("missing");
-          contenders.add(await spawnContender());
-          lastSpawn = Date.now();
+          pool.add(await spawnContender());
         }
       }
       await delay(timing.pollInterval);
     }
   } finally {
-    contenders.forEach((contender) => contender.release());
+    pool.releaseAll();
   }
 }
 async function stop(options = {}) {
   const info = await read2(options.file);
-  if (options.pty === "handoff" && info !== void 0)
-    await prepare2(options.file ?? fallback(), info, defaultEnsureTiming2.requestTimeout);
-  else
-    await clear2(options.file ?? fallback());
+  await (options.pty === "handoff" && info !== void 0 ? prepare2(options.file ?? fallback2(), info, defaultEnsureTiming2.requestTimeout) : clear2(options.file ?? fallback2())).catch((cause) => console.warn("Failed to prepare persistent terminals for replacement", cause));
   if (info !== void 0)
-    await terminate(info, options, defaultEnsureTiming2);
-}
-function fallback() {
-  return join(process.env["XDG_STATE_HOME"] ?? join(homedir(), ".local", "state"), "opencode", "service.json");
-}
-function headers(endpoint) {
-  if (endpoint.auth === void 0)
-    return;
-  return {
-    authorization: "Basic " + Buffer.from(endpoint.auth.username + ":" + endpoint.auth.password).toString("base64")
-  };
+    await terminate(info, options, ensureTiming2(options));
 }
 async function read2(file) {
-  const text = await readFile2(file ?? fallback(), "utf8").catch(() => {
+  const text = await readFile2(file ?? fallback2(), "utf8").catch(() => {
     return;
   });
   if (text === void 0)
@@ -2137,63 +2698,11 @@ async function read2(file) {
     return;
   }
 }
-async function probeResult(info, timeout = defaultEnsureTiming2.requestTimeout) {
-  const endpoint = {
-    url: info.url,
-    auth: info.password === void 0 ? void 0 : { type: "basic", username: "opencode", password: info.password }
-  };
-  const signal2 = AbortSignal.timeout(timeout);
-  const result = await fetch(new URL("/api/info", info.url), { headers: headers(endpoint), signal: signal2 }).then(async (response2) => ({
-    response: response2,
-    body: response2.status === 404 ? void 0 : await response2.json()
-  })).then((value) => ({ value }), (cause) => ({ cause }));
-  if ("cause" in result)
-    return { service: void 0, timedOut: signal2.aborted };
-  const response = result.value.response;
-  if (response.status === 404)
-    return {
-      service: {
-        info,
-        endpoint,
-        version: info.version,
-        state: "ready",
-        compatible: false
-      },
-      timedOut: false
-    };
-  const serverInfo = decodeInfo(result.value.body);
-  if (serverInfo !== void 0) {
-    if (serverInfo.pid !== info.pid)
-      return { service: void 0, timedOut: false };
-    if (info.version !== void 0 && serverInfo.version !== info.version)
-      return { service: void 0, timedOut: false };
-    return {
-      service: {
-        info,
-        endpoint,
-        version: serverInfo.version,
-        state: response.ok ? "ready" : response.status === 500 ? "failed" : "waiting",
-        compatible: true
-      },
-      timedOut: false
-    };
-  }
-  return { service: void 0, timedOut: false };
-}
-function decodeInfo(input) {
-  if (typeof input !== "object" || input === null)
-    return;
-  if (!("version" in input) || typeof input.version !== "string")
-    return;
-  if (!("pid" in input) || typeof input.pid !== "number" || !Number.isInteger(input.pid) || input.pid < 0)
-    return;
-  return { version: input.version, pid: input.pid };
-}
 async function registered(file, timeout) {
   const info = await read2(file);
   if (info === void 0)
     return { info: void 0, service: void 0, timedOut: false };
-  return { info, ...await probeResult(info, timeout) };
+  return { info, ...await probeResult2(info, timeout) };
 }
 function signal(pid, name) {
   try {
@@ -2218,18 +2727,12 @@ async function waitUntilStopped(pid, timing) {
   }
   return false;
 }
-function same2(left, right) {
-  return left.id === right.id && left.version === right.version && left.url === right.url && left.pid === right.pid;
-}
 async function terminate(info, options, timing) {
   const current = await read2(options.file);
   if (current === void 0 || !same2(current, info))
     return;
   signal(info.pid, "SIGTERM");
   if (!await waitUntilStopped(info.pid, timing)) {
-    const latest2 = await read2(options.file);
-    if (latest2 === void 0 || !same2(latest2, info))
-      return;
     signal(info.pid, "SIGKILL");
     if (!await waitUntilStopped(info.pid, timing))
       throw new Error(`Server process ${info.pid} is still running`);
@@ -2237,12 +2740,12 @@ async function terminate(info, options, timing) {
   const latest = await read2(options.file);
   if (latest === void 0 || !same2(latest, info))
     return;
-  await rm2(options.file ?? fallback(), { force: true });
+  await rm2(options.file ?? fallback2(), { force: true });
 }
 function delay(milliseconds) {
   return new Promise((resolve4) => setTimeout(resolve4, milliseconds));
 }
-var Service = { discover, ensure, stop, headers };
+var Service = { discover, ensure, stop, headers: headers2 };
 
 // src/messagePages.ts
 var MAX_MESSAGE_PAGES = 25;
@@ -2338,6 +2841,45 @@ async function ensureClient() {
   cachedEndpoint = endpoint;
   return { client, endpoint };
 }
+function isStaleEndpointError(err) {
+  if (typeof err !== "object" || err === null) {
+    return false;
+  }
+  const shaped = err;
+  if (shaped.reason === "Transport") {
+    return true;
+  }
+  const message = typeof shaped.message === "string" ? shaped.message : "";
+  return message.startsWith("Transport:") || message.endsWith("fetch failed");
+}
+var NEVER_SENT_CODES = /* @__PURE__ */ new Set(["ECONNREFUSED", "ENOTFOUND", "EAI_AGAIN", "EHOSTUNREACH", "ENETUNREACH"]);
+function neverSent(err) {
+  let node = err;
+  for (let depth = 0; depth < 6 && node !== void 0 && node !== null; depth++) {
+    const code = node.code;
+    if (typeof code === "string" && NEVER_SENT_CODES.has(code)) {
+      return true;
+    }
+    node = node.cause;
+  }
+  return false;
+}
+async function callClient(label, run, opts = {}) {
+  const { client } = await ensureClient();
+  try {
+    return await withTimeout(run(client), CALL_TIMEOUT_MS, label);
+  } catch (err) {
+    if (!isStaleEndpointError(err)) {
+      throw err;
+    }
+    disposeClient();
+    if (opts.mutating === true && !neverSent(err)) {
+      throw err;
+    }
+    const fresh = await ensureClient();
+    return withTimeout(run(fresh.client), CALL_TIMEOUT_MS, label);
+  }
+}
 async function getServerStatus() {
   let endpoint;
   try {
@@ -2358,6 +2900,9 @@ async function getServerStatus() {
       url: endpoint.url
     };
   } catch (err) {
+    if (isStaleEndpointError(err)) {
+      disposeClient();
+    }
     const reason = err instanceof Error ? err.message : String(err);
     return { status: "offline", detail: `OpenCode service unreachable: ${reason}` };
   }
@@ -2375,46 +2920,41 @@ async function restartService() {
 }
 async function listSessions(directory) {
   directory = normalizeDir(directory);
-  const { client } = await ensureClient();
-  const res = await withTimeout(
-    client.session.list({ directory, order: "desc", limit: SESSION_LIST_LIMIT }),
-    CALL_TIMEOUT_MS,
-    "session.list"
+  const res = await callClient(
+    "session.list",
+    (client) => client.session.list({ directory, order: "desc", limit: SESSION_LIST_LIMIT })
   );
   return res.data;
 }
 async function createSession(directory, title, model) {
   directory = normalizeDir(directory);
-  const { client } = await ensureClient();
-  return withTimeout(
-    client.session.create(
+  return callClient(
+    "session.create",
+    (client) => client.session.create(
       model ? { location: { directory }, title: title ?? null, model } : { location: { directory }, title: title ?? null }
     ),
-    CALL_TIMEOUT_MS,
-    "session.create"
+    { mutating: true }
   );
 }
 async function removeSession(sessionID) {
-  const { client } = await ensureClient();
-  await withTimeout(client.session.remove({ sessionID }), CALL_TIMEOUT_MS, "session.remove");
+  await callClient("session.remove", (client) => client.session.remove({ sessionID }), { mutating: true });
 }
 async function renameSession(sessionID, title) {
-  const { client } = await ensureClient();
-  await withTimeout(client.session.update({ sessionID, title }), CALL_TIMEOUT_MS, "session.update");
+  await callClient("session.update", (client) => client.session.update({ sessionID, title }), {
+    mutating: true
+  });
 }
 async function listMessages(sessionID, opts = {}) {
-  const { client } = await ensureClient();
-  const fetchPage = (cursor) => withTimeout(
-    client.message.list(
+  const fetchPage = (cursor) => callClient(
+    "message.list",
+    (client) => client.message.list(
       // `cursor` must never travel with `order`: the server answers
       // 400 InvalidCursorError and the history load dies on page two.
       // The cursor carries its own order — its payload is base64
       // {"id":"<boundary>","order":"desc","direction":"next"} — so only the
       // first request states it.
       cursor ? { sessionID, limit: MESSAGE_LIST_LIMIT, cursor } : { sessionID, order: "desc", limit: MESSAGE_LIST_LIMIT }
-    ),
-    CALL_TIMEOUT_MS,
-    "message.list"
+    )
   );
   if (opts.full) {
     return collectAllPages(fetchPage);
@@ -2423,270 +2963,230 @@ async function listMessages(sessionID, opts = {}) {
   return res.data.reverse();
 }
 async function firstUserMessage(sessionID) {
-  const { client } = await ensureClient();
-  const res = await withTimeout(
-    client.message.list({ sessionID, order: "asc", limit: 1, type: "user" }),
-    CALL_TIMEOUT_MS,
-    "message.list(first)"
+  const res = await callClient(
+    "message.list(first)",
+    (client) => client.message.list({ sessionID, order: "asc", limit: 1, type: "user" })
   );
   return res.data[0];
 }
 async function sendPrompt(sessionID, text, files) {
-  const { client } = await ensureClient();
-  await withTimeout(
-    client.session.prompt(files && files.length > 0 ? { sessionID, text, files } : { sessionID, text }),
-    CALL_TIMEOUT_MS,
-    "session.prompt"
+  await callClient(
+    "session.prompt",
+    (client) => client.session.prompt(files && files.length > 0 ? { sessionID, text, files } : { sessionID, text }),
+    { mutating: true }
   );
 }
 async function interruptSession(sessionID) {
-  const { client } = await ensureClient();
-  await withTimeout(client.session.interrupt({ sessionID }), CALL_TIMEOUT_MS, "session.interrupt");
+  await callClient("session.interrupt", (client) => client.session.interrupt({ sessionID }), {
+    mutating: true
+  });
 }
 async function compactSession(sessionID) {
-  const { client } = await ensureClient();
-  await withTimeout(client.session.compact({ sessionID }), CALL_TIMEOUT_MS, "session.compact");
+  await callClient("session.compact", (client) => client.session.compact({ sessionID }), {
+    mutating: true
+  });
 }
 async function listPermissions(sessionID) {
-  const { client } = await ensureClient();
-  return withTimeout(client.permission.list({ sessionID }), CALL_TIMEOUT_MS, "permission.list");
+  return callClient("permission.list", (client) => client.permission.list({ sessionID }));
 }
 async function replyPermission(sessionID, requestID, decision) {
-  const { client } = await ensureClient();
-  await withTimeout(
-    client.permission.reply({ sessionID, requestID, decision }),
-    CALL_TIMEOUT_MS,
-    "permission.reply"
+  await callClient(
+    "permission.reply",
+    (client) => client.permission.reply({ sessionID, requestID, decision }),
+    { mutating: true }
   );
 }
 async function listForms(sessionID) {
-  const { client } = await ensureClient();
-  return withTimeout(client.session.form.list({ sessionID }), CALL_TIMEOUT_MS, "form.list");
+  return callClient("form.list", (client) => client.session.form.list({ sessionID }));
 }
 async function replyForm(sessionID, formID, answer) {
-  const { client } = await ensureClient();
-  await withTimeout(
-    client.session.form.reply({ sessionID, formID, answer }),
-    CALL_TIMEOUT_MS,
-    "form.reply"
-  );
+  await callClient("form.reply", (client) => client.session.form.reply({ sessionID, formID, answer }), {
+    mutating: true
+  });
 }
 async function cancelForm(sessionID, formID) {
-  const { client } = await ensureClient();
-  await withTimeout(
-    client.session.form.cancel({ sessionID, formID }),
-    CALL_TIMEOUT_MS,
-    "form.cancel"
-  );
+  await callClient("form.cancel", (client) => client.session.form.cancel({ sessionID, formID }), {
+    mutating: true
+  });
 }
 function loc(directory) {
   return directory ? { directory: normalizeDir(directory) } : void 0;
 }
 async function listIntegrations(directory) {
-  const { client } = await ensureClient();
   const l = loc(directory);
-  const res = await withTimeout(
-    client.integration.list(l ? { location: l } : void 0),
-    CALL_TIMEOUT_MS,
-    "integration.list"
+  const res = await callClient(
+    "integration.list",
+    (client) => client.integration.list(l ? { location: l } : void 0)
   );
   return res.data;
 }
 async function connectKey(input) {
-  const { client } = await ensureClient();
-  await withTimeout(
-    client.integration.connect.key({
+  await callClient(
+    "integration.connect.key",
+    (client) => client.integration.connect.key({
       integrationID: input.integrationID,
       key: input.key,
       ...input.answer ? { answer: input.answer } : {},
       ...input.label ? { label: input.label } : {},
       ...input.directory ? { location: { directory: normalizeDir(input.directory) } } : {}
     }),
-    CALL_TIMEOUT_MS,
-    "integration.connect.key"
+    { mutating: true }
   );
 }
 async function oauthConnect(input) {
-  const { client } = await ensureClient();
-  const res = await withTimeout(
-    client.integration.oauth.connect({
+  const res = await callClient(
+    "integration.oauth.connect",
+    (client) => client.integration.oauth.connect({
       integrationID: input.integrationID,
       methodID: input.methodID,
       ...input.answer ? { answer: input.answer } : {},
       ...input.label ? { label: input.label } : {},
       ...input.directory ? { location: { directory: normalizeDir(input.directory) } } : {}
     }),
-    CALL_TIMEOUT_MS,
-    "integration.oauth.connect"
+    { mutating: true }
   );
   return res.data;
 }
 async function oauthStatus(integrationID, attemptID, directory) {
-  const { client } = await ensureClient();
-  const res = await withTimeout(
-    client.integration.oauth.status({
+  const res = await callClient(
+    "integration.oauth.status",
+    (client) => client.integration.oauth.status({
       integrationID,
       attemptID,
       ...directory ? { location: { directory: normalizeDir(directory) } } : {}
-    }),
-    CALL_TIMEOUT_MS,
-    "integration.oauth.status"
+    })
   );
   return res.data;
 }
 async function oauthComplete(integrationID, attemptID, code, directory) {
-  const { client } = await ensureClient();
-  await withTimeout(
-    client.integration.oauth.complete({
+  await callClient(
+    "integration.oauth.complete",
+    (client) => client.integration.oauth.complete({
       integrationID,
       attemptID,
       ...code ? { code } : {},
       ...directory ? { location: { directory: normalizeDir(directory) } } : {}
     }),
-    CALL_TIMEOUT_MS,
-    "integration.oauth.complete"
+    { mutating: true }
   );
 }
 async function oauthCancel(integrationID, attemptID, directory) {
-  const { client } = await ensureClient();
-  await withTimeout(
-    client.integration.oauth.cancel({
+  await callClient(
+    "integration.oauth.cancel",
+    (client) => client.integration.oauth.cancel({
       integrationID,
       attemptID,
       ...directory ? { location: { directory: normalizeDir(directory) } } : {}
     }),
-    CALL_TIMEOUT_MS,
-    "integration.oauth.cancel"
+    { mutating: true }
   );
 }
 async function removeCredential(credentialID) {
-  const { client } = await ensureClient();
-  await withTimeout(
-    client.credential.remove({ credentialID }),
-    CALL_TIMEOUT_MS,
-    "credential.remove"
-  );
+  await callClient("credential.remove", (client) => client.credential.remove({ credentialID }), {
+    mutating: true
+  });
 }
 async function activateCredential(credentialID) {
-  const { client } = await ensureClient();
-  await withTimeout(
-    client.credential.activate({ credentialID }),
-    CALL_TIMEOUT_MS,
-    "credential.activate"
-  );
+  await callClient("credential.activate", (client) => client.credential.activate({ credentialID }), {
+    mutating: true
+  });
 }
 async function renameCredential(credentialID, label) {
-  const { client } = await ensureClient();
-  await withTimeout(
-    client.credential.update({ credentialID, label }),
-    CALL_TIMEOUT_MS,
-    "credential.update"
-  );
+  await callClient("credential.update", (client) => client.credential.update({ credentialID, label }), {
+    mutating: true
+  });
 }
 async function commandConnect(integrationID, methodID, label, directory) {
-  const { client } = await ensureClient();
-  const res = await withTimeout(
-    client.integration.command.connect({
+  const res = await callClient(
+    "integration.command.connect",
+    (client) => client.integration.command.connect({
       integrationID,
       methodID,
       ...label ? { label } : {},
       ...directory ? { location: { directory: normalizeDir(directory) } } : {}
     }),
-    CALL_TIMEOUT_MS,
-    "integration.command.connect"
+    { mutating: true }
   );
   return res.data;
 }
 async function commandStatus(integrationID, attemptID, directory) {
-  const { client } = await ensureClient();
-  const res = await withTimeout(
-    client.integration.command.status({
+  const res = await callClient(
+    "integration.command.status",
+    (client) => client.integration.command.status({
       integrationID,
       attemptID,
       ...directory ? { location: { directory: normalizeDir(directory) } } : {}
-    }),
-    CALL_TIMEOUT_MS,
-    "integration.command.status"
+    })
   );
   return res.data;
 }
 async function commandCancel(integrationID, attemptID, directory) {
-  const { client } = await ensureClient();
-  await withTimeout(
-    client.integration.command.cancel({
+  await callClient(
+    "integration.command.cancel",
+    (client) => client.integration.command.cancel({
       integrationID,
       attemptID,
       ...directory ? { location: { directory: normalizeDir(directory) } } : {}
     }),
-    CALL_TIMEOUT_MS,
-    "integration.command.cancel"
+    { mutating: true }
   );
 }
 async function wellknownAdd(url, directory) {
-  const { client } = await ensureClient();
-  await withTimeout(
-    client.integration.wellknown.add({
+  await callClient(
+    "integration.wellknown.add",
+    (client) => client.integration.wellknown.add({
       url,
       ...directory ? { location: { directory: normalizeDir(directory) } } : {}
-    }),
-    CALL_TIMEOUT_MS,
-    "integration.wellknown.add"
+    })
   );
 }
 async function getSessionDiff(sessionID) {
-  const { client } = await ensureClient();
-  return withTimeout(client.session.diff({ sessionID }), CALL_TIMEOUT_MS, "session.diff");
+  return callClient("session.diff", (client) => client.session.diff({ sessionID }));
 }
 async function stageRevert(sessionID, messageID) {
-  const { client } = await ensureClient();
-  return withTimeout(
-    client.session.revert.stage({ sessionID, messageID, files: true }),
-    CALL_TIMEOUT_MS,
-    "revert.stage"
+  return callClient(
+    "revert.stage",
+    (client) => client.session.revert.stage({ sessionID, messageID, files: true }),
+    { mutating: true }
   );
 }
 async function commitRevert(sessionID) {
-  const { client } = await ensureClient();
-  await withTimeout(client.session.revert.commit({ sessionID }), CALL_TIMEOUT_MS, "revert.commit");
+  await callClient("revert.commit", (client) => client.session.revert.commit({ sessionID }), {
+    mutating: true
+  });
 }
 async function getSession(sessionID) {
-  const { client } = await ensureClient();
-  return withTimeout(client.session.get({ sessionID }), CALL_TIMEOUT_MS, "session.get");
+  return callClient("session.get", (client) => client.session.get({ sessionID }));
 }
 async function listModels() {
-  const { client } = await ensureClient();
-  const res = await withTimeout(client.model.list(), CALL_TIMEOUT_MS, "model.list");
+  const res = await callClient("model.list", (client) => client.model.list());
   return res.data;
 }
 async function getDefaultModel() {
-  const { client } = await ensureClient();
-  const res = await withTimeout(client.model.default(), CALL_TIMEOUT_MS, "model.default");
+  const res = await callClient("model.default", (client) => client.model.default());
   return res.data;
 }
 async function listAgents() {
-  const { client } = await ensureClient();
-  const res = await withTimeout(client.agent.list(), CALL_TIMEOUT_MS, "agent.list");
+  const res = await callClient("agent.list", (client) => client.agent.list());
   return res.data;
 }
 async function switchSessionModel(sessionID, providerID, id) {
-  const { client } = await ensureClient();
-  await withTimeout(
-    client.session.switchModel({ sessionID, model: { providerID, id } }),
-    CALL_TIMEOUT_MS,
-    "session.switchModel"
+  await callClient(
+    "session.switchModel",
+    (client) => client.session.switchModel({ sessionID, model: { providerID, id } }),
+    { mutating: true }
   );
 }
 async function switchSessionAgent(sessionID, agent) {
-  const { client } = await ensureClient();
-  await withTimeout(client.session.switchAgent({ sessionID, agent }), CALL_TIMEOUT_MS, "session.switchAgent");
+  await callClient("session.switchAgent", (client) => client.session.switchAgent({ sessionID, agent }), {
+    mutating: true
+  });
 }
 async function findFiles(directory, query) {
   directory = normalizeDir(directory);
-  const { client } = await ensureClient();
-  const res = await withTimeout(
-    client.file.find({ query, limit: FILE_FIND_LIMIT, location: { directory } }),
-    CALL_TIMEOUT_MS,
-    "file.find"
+  const res = await callClient(
+    "file.find",
+    (client) => client.file.find({ query, limit: FILE_FIND_LIMIT, location: { directory } })
   );
   return res.data;
 }
@@ -2825,6 +3325,9 @@ function startEventStream(onEvent, onError) {
           }
         }
       } catch (err) {
+        if (isStaleEndpointError(err)) {
+          disposeClient();
+        }
         failures += 1;
         if (failures === 1 || failures % 10 === 0) {
           try {
@@ -5168,7 +5671,7 @@ var ParseOptions;
     allowTrailingComma: false
   };
 })(ParseOptions || (ParseOptions = {}));
-function parse(text, errors = [], options = ParseOptions.DEFAULT) {
+function parse2(text, errors = [], options = ParseOptions.DEFAULT) {
   let currentProperty = null;
   let currentParent = [];
   const previousParents = [];
@@ -5801,7 +6304,7 @@ var SyntaxKind;
   SyntaxKind2[SyntaxKind2["Unknown"] = 16] = "Unknown";
   SyntaxKind2[SyntaxKind2["EOF"] = 17] = "EOF";
 })(SyntaxKind || (SyntaxKind = {}));
-var parse2 = parse;
+var parse3 = parse2;
 var ParseErrorCode;
 (function(ParseErrorCode2) {
   ParseErrorCode2[ParseErrorCode2["InvalidSymbol"] = 1] = "InvalidSymbol";
@@ -5856,7 +6359,7 @@ function chooseOpenCodeConfigFile(dir, exists = fs3.existsSync) {
 function addBrowserPluginToConfig(source, pluginPath) {
   const current = source.trim() ? source : "{}\n";
   const errors = [];
-  const config = parse2(current, errors);
+  const config = parse3(current, errors);
   if (errors.length || !config || Array.isArray(config)) throw new Error("Cannot edit invalid OpenCode JSONC config");
   const plugins = config.plugins;
   if (plugins !== void 0 && !Array.isArray(plugins)) throw new Error("OpenCode plugins setting is not an array");
@@ -6418,7 +6921,7 @@ var ChatViewProvider = class {
   }
   async sendCatalogs() {
     try {
-      const [models, fallback2, agents] = await Promise.all([
+      const [models, fallback, agents] = await Promise.all([
         listModels(),
         getDefaultModel(),
         listAgents()
@@ -6426,7 +6929,7 @@ var ChatViewProvider = class {
       this.post({
         type: "catalogs",
         models: models.map(modelToView),
-        defaultModel: fallback2 ? { providerID: fallback2.providerID, id: fallback2.id } : null,
+        defaultModel: fallback ? { providerID: fallback.providerID, id: fallback.id } : null,
         agents: agents.filter((a) => !a.hidden && (a.mode === "primary" || a.mode === "all")).map((a) => ({ id: a.id, name: a.name || a.id })),
         storedModel: this.storedModel() ?? null,
         storedAgent: this.storedAgent() ?? null
