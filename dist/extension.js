@@ -39,7 +39,7 @@ function make7(connect) {
     if (current === connection)
       current = void 0;
   }
-  async function run(connection) {
+  async function run2(connection) {
     let iterator;
     let completion = {};
     try {
@@ -132,7 +132,7 @@ function make7(connect) {
             if (connection.connected)
               subscriber.push(connection.connected);
             if (fresh)
-              run(connection);
+              run2(connection);
           }
           return {
             next() {
@@ -2267,9 +2267,9 @@ var init_promise = __esm({
 });
 
 // src/extension.ts
-import * as vscode5 from "vscode";
-import * as fs4 from "fs";
-import * as path6 from "path";
+import * as vscode7 from "vscode";
+import * as fs6 from "fs";
+import * as path8 from "path";
 
 // src/opencodeClient.ts
 init_promise();
@@ -2743,7 +2743,7 @@ async function terminate(info, options, timing) {
   await rm2(options.file ?? fallback2(), { force: true });
 }
 function delay(milliseconds) {
-  return new Promise((resolve4) => setTimeout(resolve4, milliseconds));
+  return new Promise((resolve5) => setTimeout(resolve5, milliseconds));
 }
 var Service = { discover, ensure, stop, headers: headers2 };
 
@@ -2864,10 +2864,10 @@ function neverSent(err) {
   }
   return false;
 }
-async function callClient(label, run, opts = {}) {
+async function callClient(label, run2, opts = {}) {
   const { client } = await ensureClient();
   try {
-    return await withTimeout(run(client), CALL_TIMEOUT_MS, label);
+    return await withTimeout(run2(client), CALL_TIMEOUT_MS, label);
   } catch (err) {
     if (!isStaleEndpointError(err)) {
       throw err;
@@ -2877,7 +2877,7 @@ async function callClient(label, run, opts = {}) {
       throw err;
     }
     const fresh = await ensureClient();
-    return withTimeout(run(fresh.client), CALL_TIMEOUT_MS, label);
+    return withTimeout(run2(fresh.client), CALL_TIMEOUT_MS, label);
   }
 }
 async function getServerStatus() {
@@ -2922,7 +2922,20 @@ async function listSessions(directory) {
   directory = normalizeDir(directory);
   const res = await callClient(
     "session.list",
-    (client) => client.session.list({ directory, order: "desc", limit: SESSION_LIST_LIMIT })
+    (client) => (
+      // `parentID: null` = top-level chats only. Subagent children are sessions
+      // too, and without the filter they would fill the list (and its 50-slot
+      // limit) with chats nobody opened — they render inside the parent instead.
+      client.session.list({ directory, order: "desc", limit: SESSION_LIST_LIMIT, parentID: null })
+    )
+  );
+  return res.data;
+}
+async function listChildSessions(directory, parentID) {
+  directory = normalizeDir(directory);
+  const res = await callClient(
+    "session.list(children)",
+    (client) => client.session.list({ directory, order: "desc", limit: SESSION_LIST_LIMIT, parentID })
   );
   return res.data;
 }
@@ -3301,7 +3314,7 @@ function toFileUri(absPath) {
   return `file://${encoded}`;
 }
 function sleep(ms) {
-  return new Promise((resolve4) => setTimeout(resolve4, ms));
+  return new Promise((resolve5) => setTimeout(resolve5, ms));
 }
 function startEventStream(onEvent, onError) {
   let stopped2 = false;
@@ -3412,6 +3425,7 @@ function integrationToView(i) {
 function permissionToView(p) {
   return { id: p.id, sessionID: p.sessionID, action: p.action, resources: p.resources, message: p.message };
 }
+var DROP_MAX_ITEMS = 50;
 function modelToView(m) {
   const free = (m.cost ?? []).every((c) => (c.input ?? 0) === 0 && (c.output ?? 0) === 0);
   return {
@@ -3561,13 +3575,19 @@ function messageToView(msg) {
     });
     const tools = msg.content.filter((p) => p.type === "tool").map((p) => {
       const st = p.state;
-      return {
+      const view = {
         id: p.id,
         name: p.name,
         status: st.status,
         durationMs: toolDurationMs(p),
         preview: st.input ? summarizeToolInput(st.input) : void 0
       };
+      const target = subagentTargetOf(p.name, st.input, st.metadata);
+      if (target) {
+        view.subagent = target;
+        view.preview = target.description ?? target.agent ?? view.preview;
+      }
+      return view;
     });
     return {
       id: msg.id,
@@ -3595,6 +3615,82 @@ function modelRefToView(m) {
   }
   return { providerID: m.providerID, id: m.id };
 }
+var SUBAGENT_TOOL_NAMES = /* @__PURE__ */ new Set(["subagent", "task"]);
+function isSubagentToolName(name) {
+  return SUBAGENT_TOOL_NAMES.has(name);
+}
+function hasSubagentCall(msg) {
+  return msg.type === "assistant" && msg.content.some((p) => p.type === "tool" && isSubagentToolName(p.name));
+}
+var SUBAGENT_MAX_STEPS = 8;
+var SUBAGENT_TEXT_MAX_CHARS = 4e3;
+var SUBAGENT_REASONING_MAX_CHARS = 2e3;
+var SUBAGENT_MAX_CHILDREN = 8;
+function subagentTargetOf(name, input, metadata) {
+  if (!isSubagentToolName(name)) {
+    return void 0;
+  }
+  const sessionID = stringField(metadata, "sessionID") ?? stringField(metadata, "sessionId");
+  const target = {
+    agent: stringField(input, "agent"),
+    description: stringField(input, "description") ?? stringField(input, "task"),
+    sessionID
+  };
+  return target;
+}
+function stringField(source, key) {
+  const value = source?.[key];
+  return typeof value === "string" && value.trim() ? value : void 0;
+}
+function clip(text, max) {
+  return text.length <= max ? text : `${text.slice(0, max)}\u2026`;
+}
+function subagentSteps(messages, limit) {
+  const all = [];
+  for (const msg of messages) {
+    if (msg.type !== "assistant") {
+      continue;
+    }
+    const text = msg.content.filter((p) => p.type === "text").map((p) => p.text).join("\n\n");
+    const reasoning = msg.content.filter((p) => p.type === "reasoning").map((p) => ({ text: clip(p.text, SUBAGENT_REASONING_MAX_CHARS) }));
+    const tools = msg.content.filter((p) => p.type === "tool").map((p) => {
+      const st = p.state;
+      return {
+        id: p.id,
+        name: p.name,
+        status: st.status,
+        durationMs: toolDurationMs(p),
+        preview: st.input ? summarizeToolInput(st.input) : void 0
+      };
+    });
+    all.push({
+      id: msg.id,
+      text: clip(text, SUBAGENT_TEXT_MAX_CHARS),
+      time: msg.time.created,
+      tools,
+      reasoning
+    });
+  }
+  return { steps: all.length > limit ? all.slice(all.length - limit) : all, total: all.length };
+}
+function subagentToView(child, messages) {
+  const busy = child.time.busy;
+  const idle = child.time.idle;
+  const running = busy !== void 0 && (idle === void 0 || busy > idle);
+  const status = running ? "running" : child.outcome === "failed" ? "error" : "completed";
+  const { steps, total } = subagentSteps(messages, SUBAGENT_MAX_STEPS);
+  const finishedAt = running ? void 0 : idle;
+  return {
+    sessionID: child.id,
+    agent: child.agent,
+    description: child.title,
+    status,
+    startedAt: child.time.created,
+    ...finishedAt !== void 0 ? { finishedAt } : {},
+    steps,
+    totalSteps: total
+  };
+}
 
 // src/constants.ts
 var VIEW_ID = "opencode-gui.chatView";
@@ -3604,13 +3700,14 @@ var PREVIEW_MAX_SESSIONS = 20;
 var PREVIEW_MAX_CHARS = 60;
 var SELECTION_MAX_CHARS = 4e3;
 var ATTACH_MAX_BASE64_CHARS = 7e6;
+var SUBAGENT_REFRESH_MS = 900;
 
 // src/util.ts
 function formatError(err) {
   return err instanceof Error ? err.message : String(err);
 }
 function sleepMs(ms) {
-  return new Promise((resolve4) => setTimeout(resolve4, ms));
+  return new Promise((resolve5) => setTimeout(resolve5, ms));
 }
 
 // src/diag.ts
@@ -3660,24 +3757,24 @@ async function diagFlush() {
   }
   diagWriting = true;
   try {
-    const fs5 = await import("node:fs");
-    const path7 = await import("node:path");
+    const fs7 = await import("node:fs");
+    const path9 = await import("node:path");
     const dir = diagStorage.fsPath;
-    fs5.mkdirSync(dir, { recursive: true });
-    const file = path7.join(dir, "opencode-gui-diag.log");
+    fs7.mkdirSync(dir, { recursive: true });
+    const file = path9.join(dir, "opencode-gui-diag.log");
     if (!diagTrimmed) {
       diagTrimmed = true;
       try {
-        const st = fs5.statSync(file);
+        const st = fs7.statSync(file);
         if (st.size > 3e5) {
-          const lines = fs5.readFileSync(file, "utf8").split("\n");
-          fs5.writeFileSync(file, lines.slice(-1500).join("\n"));
+          const lines = fs7.readFileSync(file, "utf8").split("\n");
+          fs7.writeFileSync(file, lines.slice(-1500).join("\n"));
         }
       } catch {
       }
     }
     const batch = diagQueue.splice(0, diagQueue.length);
-    fs5.appendFileSync(file, batch.join("\n") + "\n");
+    fs7.appendFileSync(file, batch.join("\n") + "\n");
   } catch {
   } finally {
     diagWriting = false;
@@ -3696,13 +3793,13 @@ function diag(dir, msg) {
   }
   void diagFlush();
 }
-function diagError(tag, err) {
+function diagError(tag2, err) {
   if (!diagStorage) {
     return;
   }
   const t = (/* @__PURE__ */ new Date()).toISOString().slice(11, 23);
   const what = err instanceof Error ? err.message : String(err);
-  diagQueue.push(`${t} ! ${tag}: ${what.replace(/\s+/g, " ").slice(0, 160)}`);
+  diagQueue.push(`${t} ! ${tag2}: ${what.replace(/\s+/g, " ").slice(0, 160)}`);
   if (diagQueue.length > 200) {
     diagQueue.splice(0, diagQueue.length - 200);
   }
@@ -3710,8 +3807,16 @@ function diagError(tag, err) {
 }
 
 // src/eventRouter.ts
+function isChildStreamEvent(type) {
+  return type.startsWith("session.text.") || type.startsWith("session.reasoning.") || type.startsWith("session.tool.") || type.startsWith("session.execution.") || type.startsWith("session.step.") || type.startsWith("session.compaction.") || type === "session.idle" || type === "session.usage.updated";
+}
 function routeEvent(provider, event) {
   const current = provider.currentSessionID;
+  const sessionID = event.data?.sessionID;
+  if (sessionID && sessionID !== current && provider.isChildSession(sessionID) && isChildStreamEvent(event.type)) {
+    provider.scheduleSubagentRefresh();
+    return;
+  }
   switch (event.type) {
     case "session.text.started":
       if (event.data.sessionID === current) {
@@ -3766,13 +3871,17 @@ function routeEvent(provider, event) {
     case "session.tool.called":
       if (event.data.sessionID === current) {
         const raw = event.data;
+        const name = raw.name ?? raw.tool ?? "tool";
         provider.post({
           type: "toolCalled",
           assistantMessageID: raw.assistantMessageID,
           callID: raw.id,
-          name: raw.name ?? raw.tool ?? "tool",
+          name,
           preview: summarizeToolInput(raw.input ?? {})
         });
+        if (isSubagentToolName(name)) {
+          provider.scheduleSubagentRefresh();
+        }
       }
       break;
     case "session.tool.success":
@@ -3826,12 +3935,24 @@ function routeEvent(provider, event) {
       void provider.refreshSessions();
       break;
     case "session.created":
+      provider.noteChildSession(event.data.parentID, event.data.sessionID);
+      if (event.data.parentID === current) {
+        void provider.refreshCurrent();
+      }
+      void provider.refreshSessions();
+      break;
     case "session.deleted":
       void provider.refreshSessions();
       break;
-    case "permission.asked":
-      provider.post({ type: "permissionAsked", permission: permissionToView(event.data) });
+    case "permission.asked": {
+      const view = permissionToView(event.data);
+      const parentID = provider.childParent(view.sessionID);
+      provider.post({
+        type: "permissionAsked",
+        permission: parentID ? { ...view, sessionID: parentID } : view
+      });
       break;
+    }
     case "permission.replied":
       provider.post({
         type: "permissionReplied",
@@ -3846,7 +3967,9 @@ function routeEvent(provider, event) {
     case "form.created": {
       const form = event.data.form;
       if (form) {
-        provider.post({ type: "formAsked", form: formToView(form) });
+        const view = formToView(form);
+        const parentID = provider.childParent(view.sessionID);
+        provider.post({ type: "formAsked", form: parentID ? { ...view, sessionID: parentID } : view });
       }
       break;
     }
@@ -4301,6 +4424,430 @@ var AuthController = class {
   }
 };
 
+// src/dictation/recorder.ts
+import { spawn as spawn2 } from "child_process";
+import * as fs2 from "fs";
+import * as os from "os";
+import * as path3 from "path";
+
+// src/dictation/recordScript.ts
+var RECORDER_SCRIPT = `
+param(
+  [Parameter(Mandatory = $true)][string]$Out,
+  [int]$MaxSeconds = 600,
+  [int]$SampleRate = 16000,
+  [int]$Device = -1,
+  [string]$StopFile = ""
+)
+
+$ErrorActionPreference = 'Stop'
+
+Add-Type -TypeDefinition @'
+using System;
+using System.IO;
+using System.Runtime.InteropServices;
+using System.Threading;
+
+public static class WinMic
+{
+    const int WAVE_MAPPER = -1;
+    const int WAVE_FORMAT_PCM = 1;
+    const int CALLBACK_NULL = 0;
+    const int WHDR_DONE = 0x00000001;
+
+    [StructLayout(LayoutKind.Sequential)]
+    struct WAVEFORMATEX
+    {
+        public ushort wFormatTag;
+        public ushort nChannels;
+        public uint nSamplesPerSec;
+        public uint nAvgBytesPerSec;
+        public ushort nBlockAlign;
+        public ushort wBitsPerSample;
+        public ushort cbSize;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    struct WAVEHDR
+    {
+        public IntPtr lpData;
+        public uint dwBufferLength;
+        public uint dwBytesRecorded;
+        public IntPtr dwUser;
+        public uint dwFlags;
+        public uint dwLoops;
+        public IntPtr lpNext;
+        public IntPtr reserved;
+    }
+
+    [DllImport("winmm.dll")] static extern int waveInGetNumDevs();
+    [DllImport("winmm.dll")] static extern int waveInOpen(out IntPtr hwi, int device, ref WAVEFORMATEX fmt, IntPtr callback, IntPtr inst, int flags);
+    [DllImport("winmm.dll")] static extern int waveInPrepareHeader(IntPtr hwi, IntPtr hdr, int size);
+    [DllImport("winmm.dll")] static extern int waveInUnprepareHeader(IntPtr hwi, IntPtr hdr, int size);
+    [DllImport("winmm.dll")] static extern int waveInAddBuffer(IntPtr hwi, IntPtr hdr, int size);
+    [DllImport("winmm.dll")] static extern int waveInStart(IntPtr hwi);
+    [DllImport("winmm.dll")] static extern int waveInStop(IntPtr hwi);
+    [DllImport("winmm.dll")] static extern int waveInReset(IntPtr hwi);
+    [DllImport("winmm.dll")] static extern int waveInClose(IntPtr hwi);
+    [DllImport("winmm.dll")] static extern int waveInGetErrorText(int code, System.Text.StringBuilder text, int len);
+
+    static string Err(int code)
+    {
+        var sb = new System.Text.StringBuilder(256);
+        waveInGetErrorText(code, sb, 256);
+        return code + " " + sb.ToString();
+    }
+
+    public static void Record(string path, int maxSeconds, int sampleRate, int device, string stopFile)
+    {
+        int count = waveInGetNumDevs();
+        if (count == 0) throw new Exception("no capture devices");
+        int index = device >= 0 && device < count ? device : WAVE_MAPPER;
+
+        var fmt = new WAVEFORMATEX
+        {
+            wFormatTag = WAVE_FORMAT_PCM,
+            nChannels = 1,
+            nSamplesPerSec = (uint)sampleRate,
+            wBitsPerSample = 16,
+            nBlockAlign = 2,
+            nAvgBytesPerSec = (uint)(sampleRate * 2),
+            cbSize = 0
+        };
+
+        IntPtr hwi;
+        int rc = waveInOpen(out hwi, index, ref fmt, IntPtr.Zero, IntPtr.Zero, CALLBACK_NULL);
+        if (rc != 0) throw new Exception("waveInOpen failed: " + Err(rc));
+
+        // One big buffer: no ordering juggling between chunks, a stop just reads
+        // dwBytesRecorded. Capacity caps a single dictation at maxSeconds.
+        int capacity = sampleRate * 2 * maxSeconds;
+        IntPtr data = Marshal.AllocHGlobal(capacity);
+        IntPtr hdrPtr = Marshal.AllocHGlobal(Marshal.SizeOf(typeof(WAVEHDR)));
+        var hdr = new WAVEHDR
+        {
+            lpData = data,
+            dwBufferLength = (uint)capacity,
+            dwBytesRecorded = 0,
+            dwUser = IntPtr.Zero,
+            dwFlags = 0,
+            dwLoops = 0,
+            lpNext = IntPtr.Zero,
+            reserved = IntPtr.Zero
+        };
+        Marshal.StructureToPtr(hdr, hdrPtr, false);
+
+        rc = waveInPrepareHeader(hwi, hdrPtr, Marshal.SizeOf(typeof(WAVEHDR)));
+        if (rc != 0) { Marshal.FreeHGlobal(data); Marshal.FreeHGlobal(hdrPtr); throw new Exception("prepare failed: " + Err(rc)); }
+        rc = waveInAddBuffer(hwi, hdrPtr, Marshal.SizeOf(typeof(WAVEHDR)));
+        if (rc != 0) { Marshal.FreeHGlobal(data); Marshal.FreeHGlobal(hdrPtr); throw new Exception("addBuffer failed: " + Err(rc)); }
+        rc = waveInStart(hwi);
+        if (rc != 0) { Marshal.FreeHGlobal(data); Marshal.FreeHGlobal(hdrPtr); throw new Exception("start failed: " + Err(rc)); }
+
+        var deadline = DateTime.UtcNow.AddSeconds(maxSeconds);
+        while (DateTime.UtcNow < deadline)
+        {
+            Thread.Sleep(100);
+            var cur = (WAVEHDR)Marshal.PtrToStructure(hdrPtr, typeof(WAVEHDR));
+            if ((cur.dwFlags & WHDR_DONE) != 0) break;
+            if (!string.IsNullOrEmpty(stopFile) && File.Exists(stopFile)) break;
+        }
+
+        waveInStop(hwi);
+        waveInReset(hwi);
+        var final = (WAVEHDR)Marshal.PtrToStructure(hdrPtr, typeof(WAVEHDR));
+        int recorded = (int)final.dwBytesRecorded;
+        waveInUnprepareHeader(hwi, hdrPtr, Marshal.SizeOf(typeof(WAVEHDR)));
+        waveInClose(hwi);
+
+        var bytes = new byte[recorded];
+        if (recorded > 0) Marshal.Copy(data, bytes, 0, recorded);
+        Marshal.FreeHGlobal(data);
+        Marshal.FreeHGlobal(hdrPtr);
+
+        using (var fs = new FileStream(path, FileMode.Create, FileAccess.Write))
+        using (var bw = new BinaryWriter(fs))
+        {
+            bw.Write(new[] { 'R', 'I', 'F', 'F' });
+            bw.Write(36 + bytes.Length);
+            bw.Write(new[] { 'W', 'A', 'V', 'E' });
+            bw.Write(new[] { 'f', 'm', 't', ' ' });
+            bw.Write(16);
+            bw.Write((ushort)WAVE_FORMAT_PCM);
+            bw.Write((ushort)1);
+            bw.Write((uint)sampleRate);
+            bw.Write((uint)(sampleRate * 2));
+            bw.Write((ushort)2);
+            bw.Write((ushort)16);
+            bw.Write(new[] { 'd', 'a', 't', 'a' });
+            bw.Write(bytes.Length);
+            bw.Write(bytes);
+        }
+    }
+}
+'@
+
+try {
+  [WinMic]::Record($Out, $MaxSeconds, $SampleRate, $Device, $StopFile)
+} catch {
+  [Console]::Error.WriteLine($_.Exception.Message)
+  exit 1
+}
+`;
+
+// src/dictation/wav.ts
+var SILENT_PEAK = 8;
+function wavInfo(bytes) {
+  if (bytes.length < 44) {
+    return void 0;
+  }
+  if (!tag(bytes, 0, "RIFF") || !tag(bytes, 8, "WAVE")) {
+    return void 0;
+  }
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  let fmt;
+  let dataOffset = -1;
+  let dataSize = 0;
+  let offset = 12;
+  while (offset + 8 <= bytes.length) {
+    const id = String.fromCharCode(bytes[offset], bytes[offset + 1], bytes[offset + 2], bytes[offset + 3]);
+    const size = view.getUint32(offset + 4, true);
+    const body = offset + 8;
+    if (id === "fmt " && body + 16 <= bytes.length) {
+      fmt = {
+        channels: view.getUint16(body + 2, true),
+        sampleRate: view.getUint32(body + 4, true),
+        bitsPerSample: view.getUint16(body + 14, true)
+      };
+    } else if (id === "data") {
+      dataOffset = body;
+      dataSize = Math.min(size, bytes.length - body);
+      break;
+    }
+    offset = body + size + size % 2;
+  }
+  if (!fmt || dataOffset < 0 || !fmt.sampleRate || !fmt.channels) {
+    return void 0;
+  }
+  const blockAlign = fmt.bitsPerSample / 8 * fmt.channels;
+  const durationMs = blockAlign > 0 ? Math.round(dataSize / (fmt.sampleRate * blockAlign) * 1e3) : 0;
+  return {
+    sampleRate: fmt.sampleRate,
+    channels: fmt.channels,
+    bitsPerSample: fmt.bitsPerSample,
+    durationMs,
+    peak: peakOf(bytes, dataOffset, dataSize, fmt.bitsPerSample)
+  };
+}
+function peakOf(bytes, offset, size, bitsPerSample) {
+  const end = offset + size;
+  if (bitsPerSample === 16) {
+    let peak = 0;
+    for (let i = offset; i + 1 < end; i += 2) {
+      const value = (bytes[i] | bytes[i + 1] << 8) << 16 >> 16;
+      const magnitude = value < 0 ? -value : value;
+      if (magnitude > peak) {
+        peak = magnitude;
+      }
+    }
+    return peak;
+  }
+  if (bitsPerSample === 8) {
+    let peak = 0;
+    for (let i = offset; i < end; i += 1) {
+      const magnitude = Math.abs(bytes[i] - 128);
+      if (magnitude > peak) {
+        peak = magnitude;
+      }
+    }
+    return peak;
+  }
+  return 0;
+}
+function tag(bytes, offset, expected) {
+  if (offset + expected.length > bytes.length) {
+    return false;
+  }
+  for (let i = 0; i < expected.length; i += 1) {
+    if (bytes[offset + i] !== expected.charCodeAt(i)) {
+      return false;
+    }
+  }
+  return true;
+}
+
+// src/dictation/recorder.ts
+var DICTATION_MAX_SECONDS = 600;
+var DICTATION_MIN_MS = 300;
+var READY_MS = 900;
+var STOP_TIMEOUT_MS = 15e3;
+function sleep2(ms) {
+  return new Promise((resolve5) => setTimeout(resolve5, ms));
+}
+var DictationRecorder = class {
+  proc;
+  exit;
+  exitCode;
+  wavPath;
+  stopPath;
+  scriptPath;
+  startedAt = 0;
+  stderr = "";
+  get active() {
+    return this.proc !== void 0;
+  }
+  async start(options = {}) {
+    if (process.platform !== "win32") {
+      throw new Error("\u0413\u043E\u043B\u043E\u0441\u043E\u0432\u043E\u0439 \u0432\u0432\u043E\u0434 \u043F\u043E\u043A\u0430 \u0440\u0430\u0431\u043E\u0442\u0430\u0435\u0442 \u0442\u043E\u043B\u044C\u043A\u043E \u043D\u0430 Windows.");
+    }
+    if (this.proc) {
+      throw new Error("\u0417\u0430\u043F\u0438\u0441\u044C \u0443\u0436\u0435 \u0438\u0434\u0451\u0442.");
+    }
+    const script = await this.ensureScript();
+    const stamp = `${Date.now().toString(36)}-${Math.floor(Math.random() * 65535).toString(16)}`;
+    const dir = path3.dirname(script);
+    this.wavPath = path3.join(dir, `voice-${stamp}.wav`);
+    this.stopPath = path3.join(dir, `voice-${stamp}.stop`);
+    this.stderr = "";
+    this.exitCode = void 0;
+    await fs2.promises.rm(this.stopPath, { force: true });
+    const args = [
+      "-NoProfile",
+      "-NonInteractive",
+      "-ExecutionPolicy",
+      "Bypass",
+      "-File",
+      script,
+      "-Out",
+      this.wavPath,
+      "-MaxSeconds",
+      String(options.maxSeconds ?? DICTATION_MAX_SECONDS),
+      "-StopFile",
+      this.stopPath
+    ];
+    if (typeof options.device === "number" && options.device >= 0) {
+      args.push("-Device", String(options.device));
+    }
+    const proc = spawn2(powershellPath(), args, { windowsHide: true });
+    this.proc = proc;
+    this.startedAt = Date.now();
+    proc.stderr?.on("data", (chunk) => {
+      this.stderr = (this.stderr + chunk.toString()).slice(-500);
+    });
+    this.exit = new Promise((resolve5) => {
+      proc.on("error", (err) => {
+        this.stderr = `${this.stderr}
+${err.message}`;
+      });
+      proc.on("exit", (code) => {
+        this.exitCode = code;
+        this.proc = void 0;
+        resolve5(code);
+      });
+    });
+    await sleep2(READY_MS);
+    if (this.proc === void 0) {
+      await this.cleanupFiles();
+      throw new Error(this.explainExit());
+    }
+  }
+  /** Stops the take and returns the captured audio. `undefined` when idle. */
+  async stop() {
+    if (!this.proc || !this.wavPath || !this.stopPath) {
+      return void 0;
+    }
+    await fs2.promises.writeFile(this.stopPath, "1");
+    const finished = await Promise.race([
+      this.exit?.then(() => true) ?? Promise.resolve(true),
+      sleep2(STOP_TIMEOUT_MS).then(() => false)
+    ]);
+    if (!finished && this.proc) {
+      this.proc.kill();
+      await this.exit;
+    }
+    const elapsed = Date.now() - this.startedAt;
+    const wavPath = this.wavPath;
+    let buffer;
+    try {
+      buffer = await fs2.promises.readFile(wavPath);
+    } catch {
+      await this.cleanupFiles();
+      throw new Error(`\u0420\u0435\u043A\u043E\u0440\u0434\u0435\u0440 \u043D\u0435 \u043E\u0442\u0434\u0430\u043B \u0444\u0430\u0439\u043B. ${this.stderr}`.trim());
+    }
+    await this.cleanupFiles();
+    if (this.exitCode !== void 0 && this.exitCode !== 0) {
+      throw new Error(this.explainExit());
+    }
+    const info = wavInfo(buffer);
+    const durationMs = info?.durationMs ?? elapsed;
+    if (durationMs < DICTATION_MIN_MS) {
+      throw new Error("\u0421\u043B\u0438\u0448\u043A\u043E\u043C \u043A\u043E\u0440\u043E\u0442\u043A\u0430\u044F \u0437\u0430\u043F\u0438\u0441\u044C \u2014 \u043D\u0430\u0436\u043C\u0438 \u043C\u0438\u043A\u0440\u043E\u0444\u043E\u043D, \u0441\u043A\u0430\u0436\u0438 \u0444\u0440\u0430\u0437\u0443 \u0438 \u043D\u0430\u0436\u043C\u0438 \u0435\u0449\u0451 \u0440\u0430\u0437.");
+    }
+    return {
+      buffer,
+      durationMs,
+      peak: info?.peak ?? 0,
+      silent: (info?.peak ?? 0) <= SILENT_PEAK
+    };
+  }
+  /** Kills the recorder without producing an attachment (panel closed, reload). */
+  cancel() {
+    this.proc?.kill();
+    this.proc = void 0;
+    void this.cleanupFiles();
+  }
+  explainExit() {
+    const detail = this.stderr.trim();
+    if (detail.includes("no capture devices")) {
+      return "Windows \u043D\u0435 \u0432\u0438\u0434\u0438\u0442 \u043D\u0438 \u043E\u0434\u043D\u043E\u0433\u043E \u043C\u0438\u043A\u0440\u043E\u0444\u043E\u043D\u0430. \u041F\u0440\u043E\u0432\u0435\u0440\u044C \u043F\u0430\u0440\u0430\u043C\u0435\u0442\u0440\u044B \u0437\u0432\u0443\u043A\u0430.";
+    }
+    if (detail.includes("waveInOpen failed")) {
+      return `\u041D\u0435 \u0441\u043C\u043E\u0433 \u043E\u0442\u043A\u0440\u044B\u0442\u044C \u043C\u0438\u043A\u0440\u043E\u0444\u043E\u043D: ${detail}`;
+    }
+    return detail ? `\u0420\u0435\u043A\u043E\u0440\u0434\u0435\u0440 \u0443\u043F\u0430\u043B: ${detail}` : "\u0420\u0435\u043A\u043E\u0440\u0434\u0435\u0440 \u0437\u0430\u0432\u0435\u0440\u0448\u0438\u043B\u0441\u044F \u0441\u0440\u0430\u0437\u0443 \u043F\u043E\u0441\u043B\u0435 \u0441\u0442\u0430\u0440\u0442\u0430. \u041F\u043E\u0445\u043E\u0436\u0435, \u043C\u0438\u043A\u0440\u043E\u0444\u043E\u043D \u043D\u0435\u0434\u043E\u0441\u0442\u0443\u043F\u0435\u043D.";
+  }
+  async ensureScript() {
+    if (this.scriptPath && fs2.existsSync(this.scriptPath)) {
+      return this.scriptPath;
+    }
+    const dir = path3.join(os.tmpdir(), "opencode-gui-dictation");
+    await fs2.promises.mkdir(dir, { recursive: true });
+    await sweepStaleTakes(dir);
+    const script = path3.join(dir, "record-voice.ps1");
+    await fs2.promises.writeFile(script, Buffer.from(RECORDER_SCRIPT, "utf8"));
+    this.scriptPath = script;
+    return script;
+  }
+  async cleanupFiles() {
+    const files = [this.wavPath, this.stopPath].filter((f) => typeof f === "string");
+    this.wavPath = void 0;
+    this.stopPath = void 0;
+    await Promise.all(files.map((file) => fs2.promises.rm(file, { force: true }).catch(() => void 0)));
+  }
+};
+function powershellPath() {
+  const root = process.env.SystemRoot ?? "C:\\Windows";
+  const candidate = path3.join(root, "System32", "WindowsPowerShell", "v1.0", "powershell.exe");
+  return fs2.existsSync(candidate) ? candidate : "powershell.exe";
+}
+async function sweepStaleTakes(dir) {
+  const cutoff = Date.now() - 36e5;
+  try {
+    const entries = await fs2.promises.readdir(dir);
+    await Promise.all(entries.filter((name) => name.startsWith("voice-")).map(async (name) => {
+      const file = path3.join(dir, name);
+      try {
+        const stat = await fs2.promises.stat(file);
+        if (stat.mtimeMs < cutoff) {
+          await fs2.promises.rm(file, { force: true });
+        }
+      } catch {
+      }
+    }));
+  } catch {
+  }
+}
+
 // src/handlers/auth.ts
 import * as vscode from "vscode";
 var authHandlers = {
@@ -4556,6 +5103,186 @@ var chatHandlers = {
   }
 };
 
+// src/handlers/dictation.ts
+import * as vscode3 from "vscode";
+
+// src/dictation/whisper.ts
+import { spawn as spawn3 } from "child_process";
+import * as fs3 from "fs";
+import * as os2 from "os";
+import * as path4 from "path";
+import * as vscode2 from "vscode";
+var TRANSCRIBE_TIMEOUT_MS = 18e4;
+var MODEL_FILE = "ggml-large-v3-turbo-q5_0.bin";
+function voiceHome() {
+  const override = process.env.VOICE_INPUT_HOME;
+  if (override && override.trim()) {
+    return override.trim();
+  }
+  return path4.join(process.env.LOCALAPPDATA ?? os2.homedir(), "voice-input");
+}
+function whisperDir() {
+  return path4.join(voiceHome(), "whisper");
+}
+function cliPath() {
+  return path4.join(whisperDir(), "whisper-cli.exe");
+}
+function modelPath() {
+  return path4.join(whisperDir(), MODEL_FILE);
+}
+function setupScript() {
+  return path4.join(voiceHome(), "setup.ps1");
+}
+function isReady() {
+  return fs3.existsSync(cliPath()) && fs3.existsSync(modelPath());
+}
+async function ensureInstalledInteractive() {
+  if (isReady()) {
+    return;
+  }
+  const setup = setupScript();
+  if (!fs3.existsSync(setup)) {
+    throw new Error(
+      `\u0420\u0430\u0441\u043F\u043E\u0437\u043D\u0430\u0432\u0430\u043D\u0438\u0435 \u0440\u0435\u0447\u0438 \u043D\u0435 \u0443\u0441\u0442\u0430\u043D\u043E\u0432\u043B\u0435\u043D\u043E. \u0417\u0430\u043F\u0443\u0441\u0442\u0438 \u043E\u0434\u0438\u043D \u0440\u0430\u0437:
+powershell -NoProfile -ExecutionPolicy Bypass -File "${path4.join("01_Processes", "voice_input", "setup.ps1")}"
+(\u0438\u0437 \u043A\u043E\u0440\u043D\u044F workspace; \u0441\u043A\u0440\u0438\u043F\u0442 \u043A\u043B\u0430\u0434\u0451\u0442 whisper \u0432 ${whisperDir()})`
+    );
+  }
+  await vscode2.window.withProgress(
+    { location: vscode2.ProgressLocation.Notification, title: "\u0413\u043E\u043B\u043E\u0441\u043E\u0432\u043E\u0439 \u0432\u0432\u043E\u0434: \u0443\u0441\u0442\u0430\u043D\u043E\u0432\u043A\u0430 \u0440\u0430\u0441\u043F\u043E\u0437\u043D\u0430\u0432\u0430\u043D\u0438\u044F", cancellable: false },
+    async (progress) => {
+      progress.report({ message: "\u041F\u0435\u0440\u0432\u044B\u0439 \u0437\u0430\u043F\u0443\u0441\u043A \u043A\u0430\u0447\u0430\u0435\u0442 \u043C\u043E\u0434\u0435\u043B\u044C (~550 \u041C\u0411), \u044D\u0442\u043E \u043D\u0430\u0434\u043E\u043B\u0433\u043E" });
+      await runFile(setup);
+      if (!isReady()) {
+        throw new Error("\u0423\u0441\u0442\u0430\u043D\u043E\u0432\u043A\u0430 \u0437\u0430\u0432\u0435\u0440\u0448\u0438\u043B\u0430\u0441\u044C, \u043D\u043E \u0444\u0430\u0439\u043B\u043E\u0432 \u043D\u0435\u0442 \u2014 \u043F\u0440\u043E\u0432\u0435\u0440\u044C \u0432\u044B\u0432\u043E\u0434 setup.ps1.");
+      }
+    }
+  );
+}
+async function transcribeBuffer(buffer, language) {
+  if (!isReady()) {
+    throw new Error("\u0420\u0430\u0441\u043F\u043E\u0437\u043D\u0430\u0432\u0430\u043D\u0438\u0435 \u0440\u0435\u0447\u0438 \u043D\u0435 \u0443\u0441\u0442\u0430\u043D\u043E\u0432\u043B\u0435\u043D\u043E.");
+  }
+  const dir = path4.join(os2.tmpdir(), "opencode-gui-dictation");
+  await fs3.promises.mkdir(dir, { recursive: true });
+  const stamp = `${Date.now().toString(36)}-${Math.floor(Math.random() * 65535).toString(16)}`;
+  const wav = path4.join(dir, `stt-${stamp}.wav`);
+  const outBase = path4.join(dir, `stt-${stamp}`);
+  await fs3.promises.writeFile(wav, buffer);
+  const threads = Math.max(2, (os2.cpus()?.length ?? 4) - 1);
+  const args = [
+    "-m",
+    modelPath(),
+    "-f",
+    wav,
+    "-l",
+    language || "ru",
+    "-t",
+    String(threads),
+    "-nt",
+    "-np",
+    "-otxt",
+    "-of",
+    outBase
+  ];
+  try {
+    await run(cliPath(), args, TRANSCRIBE_TIMEOUT_MS);
+    const raw = await fs3.promises.readFile(`${outBase}.txt`, "utf8");
+    return raw.split(/\r?\n/).map((line) => line.replace(/^\[[^\]]*\]\s*/, "").trim()).filter(Boolean).join(" ").replace(/\s{2,}/g, " ").trim();
+  } finally {
+    await Promise.all([wav, `${outBase}.txt`].map((file) => fs3.promises.rm(file, { force: true }).catch(() => void 0)));
+  }
+}
+function powershell() {
+  const root = process.env.SystemRoot ?? "C:\\Windows";
+  const candidate = path4.join(root, "System32", "WindowsPowerShell", "v1.0", "powershell.exe");
+  return fs3.existsSync(candidate) ? candidate : "powershell.exe";
+}
+function runFile(script) {
+  return run(powershell(), ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", script], 0);
+}
+function run(exe, args, timeoutMs) {
+  return new Promise((resolve5, reject) => {
+    const proc = spawn3(exe, args, { windowsHide: true });
+    let stdout = "";
+    let stderr = "";
+    proc.stdout?.on("data", (chunk) => {
+      stdout += chunk.toString();
+    });
+    proc.stderr?.on("data", (chunk) => {
+      stderr = (stderr + chunk.toString()).slice(-600);
+    });
+    const timer = timeoutMs > 0 ? setTimeout(() => {
+      proc.kill();
+      reject(new Error("\u0440\u0430\u0441\u043F\u043E\u0437\u043D\u0430\u0432\u0430\u043D\u0438\u0435 \u043D\u0435 \u0443\u043B\u043E\u0436\u0438\u043B\u043E\u0441\u044C \u0432 \u043B\u0438\u043C\u0438\u0442 \u0432\u0440\u0435\u043C\u0435\u043D\u0438"));
+    }, timeoutMs) : void 0;
+    proc.on("error", (err) => {
+      if (timer) {
+        clearTimeout(timer);
+      }
+      reject(err);
+    });
+    proc.on("exit", (code) => {
+      if (timer) {
+        clearTimeout(timer);
+      }
+      if (code === 0) {
+        resolve5(stdout);
+      } else {
+        reject(new Error(stderr.trim() || `exit ${code}`));
+      }
+    });
+  });
+}
+
+// src/handlers/dictation.ts
+function dictationLanguage() {
+  const value = vscode3.workspace.getConfiguration("opencode-gui").get("dictationLanguage");
+  return typeof value === "string" && value.trim() ? value.trim() : "ru";
+}
+var dictationHandlers = {
+  async startRecording(ctx) {
+    if (!ctx.workspaceDir) {
+      ctx.post({ type: "recording", state: "failed", message: "Open a folder first." });
+      return;
+    }
+    try {
+      await ensureInstalledInteractive();
+      await ctx.dictation.start();
+      ctx.post({ type: "recording", state: "started", startedAt: Date.now() });
+    } catch (err) {
+      ctx.post({ type: "recording", state: "failed", message: formatError(err) });
+    }
+  },
+  async stopRecording(ctx) {
+    if (!ctx.dictation.active) {
+      ctx.post({ type: "recording", state: "failed", message: "\u0417\u0430\u043F\u0438\u0441\u044C \u0443\u0436\u0435 \u043E\u0441\u0442\u0430\u043D\u043E\u0432\u043B\u0435\u043D\u0430." });
+      return;
+    }
+    try {
+      const result = await ctx.dictation.stop();
+      if (!result) {
+        ctx.post({ type: "recording", state: "failed", message: "\u0417\u0430\u043F\u0438\u0441\u044C \u043D\u0435 \u0443\u0434\u0430\u043B\u0430\u0441\u044C." });
+        return;
+      }
+      if (result.silent) {
+        ctx.post({ type: "recording", state: "stopped" });
+        ctx.post({ type: "error", message: "\u0412 \u0437\u0430\u043F\u0438\u0441\u0438 \u0442\u0438\u0448\u0438\u043D\u0430: \u043F\u043E\u0445\u043E\u0436\u0435, \u043C\u0438\u043A\u0440\u043E\u0444\u043E\u043D \u0432\u044B\u043A\u043B\u044E\u0447\u0435\u043D \u0438\u043B\u0438 \u0437\u0430\u043C\u044C\u044E\u0447\u0435\u043D \u0432 Windows." });
+        return;
+      }
+      const text = await transcribeBuffer(result.buffer, dictationLanguage());
+      ctx.post({ type: "recording", state: "stopped" });
+      if (!text) {
+        ctx.post({ type: "error", message: "\u041D\u0435 \u0440\u0430\u0437\u043E\u0431\u0440\u0430\u043B \u0440\u0435\u0447\u044C \u2014 \u043F\u043E\u043F\u0440\u043E\u0431\u0443\u0439 \u0435\u0449\u0451 \u0440\u0430\u0437, \u0431\u043B\u0438\u0436\u0435 \u043A \u043C\u0438\u043A\u0440\u043E\u0444\u043E\u043D\u0443." });
+        return;
+      }
+      ctx.post({ type: "dictationText", text });
+    } catch (err) {
+      ctx.post({ type: "recording", state: "failed", message: formatError(err) });
+    }
+  }
+};
+
 // src/handlers/diffs.ts
 var diffHandlers = {
   async getDiff(ctx) {
@@ -4599,18 +5326,18 @@ var diffHandlers = {
 };
 
 // src/handlers/files.ts
-import * as fs2 from "fs";
-import * as path4 from "path";
-import * as vscode2 from "vscode";
+import * as fs4 from "fs";
+import * as path6 from "path";
+import * as vscode4 from "vscode";
 
 // src/openPath.ts
-import * as path3 from "path";
+import * as path5 from "path";
 var MAX_REF_CHARS = 2048;
 function sameOrInside(target, root) {
   const win = process.platform === "win32";
   const t = win ? target.toLowerCase() : target;
   const r = win ? root.toLowerCase() : root;
-  return t === r || t.startsWith(r + path3.sep);
+  return t === r || t.startsWith(r + path5.sep);
 }
 async function resolveOpenTarget(raw, workspaceDir, deps) {
   const ref = typeof raw === "string" ? raw.trim() : "";
@@ -4620,7 +5347,7 @@ async function resolveOpenTarget(raw, workspaceDir, deps) {
   if (!workspaceDir) {
     return void 0;
   }
-  const root = path3.resolve(workspaceDir);
+  const root = path5.resolve(workspaceDir);
   const probe = (target) => {
     if (!sameOrInside(target, root)) {
       return void 0;
@@ -4630,17 +5357,17 @@ async function resolveOpenTarget(raw, workspaceDir, deps) {
     }
     return { kind: deps.isDirectory(target) ? "directory" : "file", path: target };
   };
-  const direct = path3.isAbsolute(ref) ? path3.normalize(ref) : path3.resolve(root, ref);
+  const direct = path5.isAbsolute(ref) ? path5.normalize(ref) : path5.resolve(root, ref);
   const hit = probe(direct);
   if (hit) {
     return hit;
   }
-  const name = path3.basename(ref);
+  const name = path5.basename(ref);
   if (!name || name === "." || name === "..") {
     return void 0;
   }
   for (const rel of await deps.findByName(name)) {
-    const found = probe(path3.resolve(root, rel));
+    const found = probe(path5.resolve(root, rel));
     if (found) {
       return found;
     }
@@ -4649,6 +5376,44 @@ async function resolveOpenTarget(raw, workspaceDir, deps) {
 }
 
 // src/handlers/files.ts
+var SCHEME_RE = /^[a-z][a-z0-9+.-]*:/i;
+var WIN_ABS_RE = /^[a-zA-Z]:[\\/]/;
+function resolveDropTarget(raw, workspaceDir) {
+  let abs;
+  if (!WIN_ABS_RE.test(raw) && SCHEME_RE.test(raw)) {
+    const fsPath = fileUriToFsPath(raw);
+    if (!fsPath) {
+      return "outside";
+    }
+    abs = fsPath;
+  } else if (path6.isAbsolute(raw) || WIN_ABS_RE.test(raw)) {
+    abs = raw;
+  } else {
+    abs = path6.resolve(workspaceDir, raw);
+  }
+  const rel = relativeInside(abs, workspaceDir);
+  if (rel === void 0) {
+    return "outside";
+  }
+  let stat;
+  try {
+    stat = fs4.statSync(abs);
+  } catch {
+    return "missing";
+  }
+  return { abs, rel, kind: stat.isDirectory() ? "directory" : "file" };
+}
+function relativeInside(abs, workspaceDir) {
+  const root = path6.resolve(workspaceDir);
+  const rel = path6.relative(root, path6.resolve(abs));
+  if (!rel) {
+    return ".";
+  }
+  if (rel.startsWith("..") || path6.isAbsolute(rel)) {
+    return void 0;
+  }
+  return rel.split(path6.sep).join("/");
+}
 var fileHandlers = {
   async findFiles(ctx, msg) {
     const dir = ctx.workspaceDir;
@@ -4666,7 +5431,7 @@ var fileHandlers = {
         reqID: typeof reqID === "string" ? reqID : void 0,
         query,
         files: found.filter((f) => f.type === "file").map((f) => {
-          const abs = path4.join(dir, f.path);
+          const abs = path6.join(dir, f.path);
           return { path: f.path, uri: toFileUri(abs) };
         })
       });
@@ -4709,10 +5474,10 @@ var fileHandlers = {
       return;
     }
     const target = await resolveOpenTarget(file, dir, {
-      exists: (p) => fs2.existsSync(p),
+      exists: (p) => fs4.existsSync(p),
       isDirectory: (p) => {
         try {
-          return fs2.statSync(p).isDirectory();
+          return fs4.statSync(p).isDirectory();
         } catch {
           return false;
         }
@@ -4725,22 +5490,50 @@ var fileHandlers = {
     }
     try {
       if (target.kind === "directory") {
-        await vscode2.commands.executeCommand("revealInExplorer", vscode2.Uri.file(target.path));
+        await vscode4.commands.executeCommand("revealInExplorer", vscode4.Uri.file(target.path));
         return;
       }
-      const doc = await vscode2.workspace.openTextDocument(target.path);
-      const editor = await vscode2.window.showTextDocument(doc, { preview: false });
+      const doc = await vscode4.workspace.openTextDocument(target.path);
+      const editor = await vscode4.window.showTextDocument(doc, { preview: false });
       if (editor && startLine) {
         const lastLine = Math.max(0, doc.lineCount - 1);
         const from = Math.min(startLine - 1, lastLine);
         const to = Math.min((endLine ?? startLine) - 1, lastLine);
-        const range = new vscode2.Range(from, 0, Math.max(from, to), 0);
-        editor.revealRange(range, vscode2.TextEditorRevealType.InCenter);
-        editor.selection = new vscode2.Selection(range.start, range.end);
+        const range = new vscode4.Range(from, 0, Math.max(from, to), 0);
+        editor.revealRange(range, vscode4.TextEditorRevealType.InCenter);
+        editor.selection = new vscode4.Selection(range.start, range.end);
       }
     } catch (err) {
       ctx.post({ type: "error", message: `Cannot open ${file}: ${formatError(err)}` });
     }
+  },
+  async resolveDrops(ctx, msg) {
+    const reqID = typeof msg.reqID === "string" ? msg.reqID : void 0;
+    const dir = ctx.workspaceDir;
+    const items = Array.isArray(msg.items) ? msg.items.filter((x) => typeof x === "string" && x.length > 0 && x.length <= 2048).slice(0, DROP_MAX_ITEMS) : [];
+    if (!dir) {
+      ctx.post({ type: "dropResolved", reqID, entries: [], error: "\u041E\u0442\u043A\u0440\u043E\u0439 \u043F\u0430\u043F\u043A\u0443, \u0447\u0442\u043E\u0431\u044B \u043F\u0440\u0438\u043A\u0440\u0435\u043F\u043B\u044F\u0442\u044C \u0444\u0430\u0439\u043B\u044B \u0438 \u043F\u0430\u043F\u043A\u0438." });
+      return;
+    }
+    const entries = [];
+    let outside = 0;
+    let missing = 0;
+    for (const item of items) {
+      const target = resolveDropTarget(item, dir);
+      if (target === "outside") {
+        outside++;
+        continue;
+      }
+      if (target === "missing") {
+        missing++;
+        continue;
+      }
+      if (entries.some((e) => e.path === target.rel)) {
+        continue;
+      }
+      entries.push({ path: target.rel, uri: toFileUri(target.abs), kind: target.kind });
+    }
+    ctx.post({ type: "dropResolved", reqID, entries, outside, missing });
   },
   async openAttachment(ctx, msg) {
     const uri = msg.uri;
@@ -4755,7 +5548,7 @@ var fileHandlers = {
       return;
     }
     try {
-      await vscode2.commands.executeCommand("vscode.open", vscode2.Uri.file(fsPath));
+      await vscode4.commands.executeCommand("vscode.open", vscode4.Uri.file(fsPath));
     } catch (err) {
       ctx.post({ type: "error", message: `Cannot open attachment: ${formatError(err)}` });
     }
@@ -4820,7 +5613,7 @@ var formHandlers = {
 };
 
 // src/handlers/sessions.ts
-import * as vscode3 from "vscode";
+import * as vscode5 from "vscode";
 var sessionHandlers = {
   async ready(ctx) {
     await ctx.refreshSessions();
@@ -4868,7 +5661,7 @@ var sessionHandlers = {
     if (!id) {
       return;
     }
-    const answer = await vscode3.window.showWarningMessage(
+    const answer = await vscode5.window.showWarningMessage(
       "Delete this OpenCode session? The conversation is gone for good.",
       { modal: true },
       "\u0423\u0434\u0430\u043B\u0438\u0442\u044C"
@@ -4940,6 +5733,9 @@ var REQUEST_TYPES = [
   "refreshCatalogs",
   "findFiles",
   "saveAttachment",
+  "resolveDrops",
+  "startRecording",
+  "stopRecording",
   "openFile",
   "openAttachment",
   "connectKey",
@@ -4965,6 +5761,7 @@ var requestHandlers = {
   ...chatHandlers,
   ...catalogHandlers,
   ...fileHandlers,
+  ...dictationHandlers,
   ...authHandlers,
   ...diffHandlers,
   ...formHandlers
@@ -4978,11 +5775,11 @@ async function dispatchRequest(ctx, msg) {
 }
 
 // src/browserTools.ts
-import * as vscode4 from "vscode";
-import * as fs3 from "node:fs";
-import * as os from "node:os";
-import * as path5 from "node:path";
-import { spawn as spawn2 } from "node:child_process";
+import * as vscode6 from "vscode";
+import * as fs5 from "node:fs";
+import * as os3 from "node:os";
+import * as path7 from "node:path";
+import { spawn as spawn4 } from "node:child_process";
 
 // ../../node_modules/jsonc-parser/lib/esm/impl/scanner.js
 function createScanner(text, ignoreTrivia = false) {
@@ -5752,11 +6549,11 @@ function parseTree(text, errors = [], options = ParseOptions.DEFAULT) {
       onValue({ type: getNodeType(value), offset, length, parent: currentParent, value });
       ensurePropertyComplete(offset + length);
     },
-    onSeparator: (sep3, offset, length) => {
+    onSeparator: (sep4, offset, length) => {
       if (currentParent.type === "property") {
-        if (sep3 === ":") {
+        if (sep4 === ":") {
           currentParent.colonOffset = offset;
-        } else if (sep3 === ",") {
+        } else if (sep4 === ",") {
           ensurePropertyComplete(offset);
         }
       }
@@ -5772,12 +6569,12 @@ function parseTree(text, errors = [], options = ParseOptions.DEFAULT) {
   }
   return result;
 }
-function findNodeAtLocation(root, path7) {
+function findNodeAtLocation(root, path9) {
   if (!root) {
     return void 0;
   }
   let node = root;
-  for (let segment of path7) {
+  for (let segment of path9) {
     if (typeof segment === "string") {
       if (node.type !== "object" || !Array.isArray(node.children)) {
         return void 0;
@@ -6131,14 +6928,14 @@ function getNodeType(value) {
 
 // ../../node_modules/jsonc-parser/lib/esm/impl/edit.js
 function setProperty(text, originalPath, value, options) {
-  const path7 = originalPath.slice();
+  const path9 = originalPath.slice();
   const errors = [];
   const root = parseTree(text, errors);
   let parent = void 0;
   let lastSegment = void 0;
-  while (path7.length > 0) {
-    lastSegment = path7.pop();
-    parent = findNodeAtLocation(root, path7);
+  while (path9.length > 0) {
+    lastSegment = path9.pop();
+    parent = findNodeAtLocation(root, path9);
     if (parent === void 0 && value !== void 0) {
       if (typeof lastSegment === "string") {
         value = { [lastSegment]: value };
@@ -6324,8 +7121,8 @@ var ParseErrorCode;
   ParseErrorCode2[ParseErrorCode2["InvalidEscapeCharacter"] = 15] = "InvalidEscapeCharacter";
   ParseErrorCode2[ParseErrorCode2["InvalidCharacter"] = 16] = "InvalidCharacter";
 })(ParseErrorCode || (ParseErrorCode = {}));
-function modify(text, path7, value, options) {
-  return setProperty(text, path7, value, options);
+function modify(text, path9, value, options) {
+  return setProperty(text, path9, value, options);
 }
 function applyEdits(text, edits) {
   let sortedEdits = edits.slice(0).sort((a, b) => {
@@ -6349,11 +7146,11 @@ function applyEdits(text, edits) {
 }
 
 // src/browserTools.ts
-var stateFile = path5.join(os.homedir(), ".opencode-gui", "browser-bridge.json");
-function chooseOpenCodeConfigFile(dir, exists = fs3.existsSync) {
-  const jsonc = path5.join(dir, "opencode.jsonc");
+var stateFile = path7.join(os3.homedir(), ".opencode-gui", "browser-bridge.json");
+function chooseOpenCodeConfigFile(dir, exists = fs5.existsSync) {
+  const jsonc = path7.join(dir, "opencode.jsonc");
   if (exists(jsonc)) return jsonc;
-  const json2 = path5.join(dir, "opencode.json");
+  const json2 = path7.join(dir, "opencode.json");
   return exists(json2) ? json2 : jsonc;
 }
 function addBrowserPluginToConfig(source, pluginPath) {
@@ -6371,7 +7168,7 @@ function addBrowserPluginToConfig(source, pluginPath) {
 }
 function readState() {
   try {
-    const state = JSON.parse(fs3.readFileSync(stateFile, "utf8"));
+    const state = JSON.parse(fs5.readFileSync(stateFile, "utf8"));
     const url = new URL(state.url);
     if (url.protocol === "http:" && url.hostname === "127.0.0.1" && /^[a-f0-9]{64}$/.test(state.token)) return state;
   } catch {
@@ -6396,33 +7193,33 @@ var BrowserTools = class {
   }
   child;
   async enable() {
-    const asset = path5.join(this.context.extensionPath, "browser-runtime", "plugin");
-    const target = path5.join(this.context.globalStorageUri.fsPath, "browser-plugin");
-    const configFile = chooseOpenCodeConfigFile(path5.join(os.homedir(), ".config", "opencode"));
-    if (!fs3.existsSync(path5.join(asset, "index.mjs"))) throw new Error("Bundled browser plugin is missing");
-    const answer = await vscode4.window.showWarningMessage(
+    const asset = path7.join(this.context.extensionPath, "browser-runtime", "plugin");
+    const target = path7.join(this.context.globalStorageUri.fsPath, "browser-plugin");
+    const configFile = chooseOpenCodeConfigFile(path7.join(os3.homedir(), ".config", "opencode"));
+    if (!fs5.existsSync(path7.join(asset, "index.mjs"))) throw new Error("Bundled browser plugin is missing");
+    const answer = await vscode6.window.showWarningMessage(
       `Enable Browser Tools in ${configFile}? This adds the local plugin to the global OpenCode config.`,
       { modal: true },
       "Enable Browser Tools"
     );
     if (answer !== "Enable Browser Tools") return;
-    fs3.mkdirSync(target, { recursive: true });
-    fs3.copyFileSync(path5.join(asset, "index.mjs"), path5.join(target, "index.mjs"));
-    fs3.copyFileSync(path5.join(asset, "package.json"), path5.join(target, "package.json"));
-    fs3.mkdirSync(path5.dirname(configFile), { recursive: true });
-    const original = fs3.existsSync(configFile) ? fs3.readFileSync(configFile, "utf8") : "{}\n";
+    fs5.mkdirSync(target, { recursive: true });
+    fs5.copyFileSync(path7.join(asset, "index.mjs"), path7.join(target, "index.mjs"));
+    fs5.copyFileSync(path7.join(asset, "package.json"), path7.join(target, "package.json"));
+    fs5.mkdirSync(path7.dirname(configFile), { recursive: true });
+    const original = fs5.existsSync(configFile) ? fs5.readFileSync(configFile, "utf8") : "{}\n";
     const updated = addBrowserPluginToConfig(original, target.replace(/\\/g, "/"));
-    if (updated !== original) fs3.writeFileSync(configFile, updated, "utf8");
-    vscode4.window.showInformationMessage("Browser Tools enabled. Restart OpenCode, then start a new session to load the plugin.");
+    if (updated !== original) fs5.writeFileSync(configFile, updated, "utf8");
+    vscode6.window.showInformationMessage("Browser Tools enabled. Restart OpenCode, then start a new session to load the plugin.");
   }
   async start() {
     if (!await health()) {
-      const script = path5.join(this.context.extensionPath, "browser-runtime", "bridge", "main.cjs");
-      if (!fs3.existsSync(script)) throw new Error("Bundled browser bridge is missing");
+      const script = path7.join(this.context.extensionPath, "browser-runtime", "bridge", "main.cjs");
+      if (!fs5.existsSync(script)) throw new Error("Bundled browser bridge is missing");
       if (this.child && this.child.exitCode === null) this.dispose();
-      const allowPrivate = vscode4.workspace.getConfiguration("opencode-gui").get("browser.allowPrivateNetworks", false);
+      const allowPrivate = vscode6.workspace.getConfiguration("opencode-gui").get("browser.allowPrivateNetworks", false);
       let spawnError;
-      const child = spawn2(process.execPath, [script], {
+      const child = spawn4(process.execPath, [script], {
         env: {
           ...process.env,
           ELECTRON_RUN_AS_NODE: "1",
@@ -6443,7 +7240,7 @@ var BrowserTools = class {
           break;
         }
         if (child.exitCode !== null) break;
-        await new Promise((resolve4) => setTimeout(resolve4, 100));
+        await new Promise((resolve5) => setTimeout(resolve5, 100));
       }
       if (!ready) throw new Error("Browser bridge did not start");
     }
@@ -6463,12 +7260,12 @@ var BrowserTools = class {
       }
       throw new Error(`Browser launch failed (${response.status})${detail}`);
     }
-    vscode4.window.showInformationMessage("Browser Tools: isolated Chromium is running.");
+    vscode6.window.showInformationMessage("Browser Tools: isolated Chromium is running.");
   }
   async status() {
     const state = readState();
     if (!state || !await health(state)) {
-      vscode4.window.showInformationMessage("Browser Tools: bridge stopped. Run Start Browser Tools.");
+      vscode6.window.showInformationMessage("Browser Tools: bridge stopped. Run Start Browser Tools.");
       return;
     }
     try {
@@ -6477,9 +7274,9 @@ var BrowserTools = class {
         signal: AbortSignal.timeout(2e3)
       });
       const body = await response.json();
-      vscode4.window.showInformationMessage(body.browser === "running" ? "Browser Tools: bridge and isolated Chromium are running." : "Browser Tools: bridge running, Chromium stopped. Run Start Browser Tools to launch it.");
+      vscode6.window.showInformationMessage(body.browser === "running" ? "Browser Tools: bridge and isolated Chromium are running." : "Browser Tools: bridge running, Chromium stopped. Run Start Browser Tools to launch it.");
     } catch {
-      vscode4.window.showInformationMessage("Browser Tools: bridge running, browser state unavailable.");
+      vscode6.window.showInformationMessage("Browser Tools: bridge running, browser state unavailable.");
     }
   }
   dispose() {
@@ -6489,7 +7286,7 @@ var BrowserTools = class {
     const forceKill = () => {
       if (child.exitCode !== null) return;
       if (process.platform === "win32" && child.pid) {
-        spawn2("taskkill", ["/pid", String(child.pid), "/t", "/f"], { stdio: "ignore", windowsHide: true });
+        spawn4("taskkill", ["/pid", String(child.pid), "/t", "/f"], { stdio: "ignore", windowsHide: true });
       } else {
         child.kill("SIGKILL");
       }
@@ -6514,17 +7311,17 @@ async function activate(context) {
     ["opencode-gui.browserStart", () => browserTools.start()],
     ["opencode-gui.browserStatus", () => browserTools.status()]
   ]) {
-    context.subscriptions.push(vscode5.commands.registerCommand(command, async () => {
+    context.subscriptions.push(vscode7.commands.registerCommand(command, async () => {
       try {
         await action();
       } catch (error) {
-        vscode5.window.showWarningMessage(`Browser Tools: ${formatError(error)}`);
+        vscode7.window.showWarningMessage(`Browser Tools: ${formatError(error)}`);
       }
     }));
   }
-  const rawDir = vscode5.workspace.workspaceFolders?.[0]?.uri.fsPath;
+  const rawDir = vscode7.workspace.workspaceFolders?.[0]?.uri.fsPath;
   const workspaceDir = rawDir ? normalizeDir(rawDir) : void 0;
-  const statusBar = vscode5.window.createStatusBarItem(vscode5.StatusBarAlignment.Right, 100);
+  const statusBar = vscode7.window.createStatusBarItem(vscode7.StatusBarAlignment.Right, 100);
   statusBar.text = "$(comment-discussion) OpenCode GUI: \u2026";
   statusBar.tooltip = "OpenCode GUI";
   statusBar.command = "opencode-gui.openPanel";
@@ -6540,7 +7337,7 @@ async function activate(context) {
     },
     context.globalStorageUri
   );
-  context.subscriptions.push(vscode5.window.registerWebviewViewProvider(VIEW_ID, provider));
+  context.subscriptions.push(vscode7.window.registerWebviewViewProvider(VIEW_ID, provider));
   let lastOnline = false;
   let lastDetail = "OpenCode GUI";
   let statusModel = "";
@@ -6556,7 +7353,7 @@ Model: ${statusModel}` : detail;
     } else {
       statusBar.text = "$(comment-discussion) OpenCode GUI: offline";
       statusBar.tooltip = `${detail} \u2014 run "OpenCode GUI: Reconnect".`;
-      statusBar.backgroundColor = new vscode5.ThemeColor("statusBarItem.errorBackground");
+      statusBar.backgroundColor = new vscode7.ThemeColor("statusBarItem.errorBackground");
     }
   }
   let statusVersion = "?";
@@ -6566,43 +7363,43 @@ Model: ${statusModel}` : detail;
     renderStatus(s.status === "online", s.detail);
   }
   context.subscriptions.push(
-    vscode5.commands.registerCommand("opencode-gui.reconnect", async () => {
+    vscode7.commands.registerCommand("opencode-gui.reconnect", async () => {
       disposeClient();
       await refreshStatus();
     })
   );
   context.subscriptions.push(
-    vscode5.commands.registerCommand("opencode-gui.restartServer", async () => {
+    vscode7.commands.registerCommand("opencode-gui.restartServer", async () => {
       try {
         const info = await restartService();
         statusVersion = info.version;
         renderStatus(true, `Connected to OpenCode v${info.version} at ${info.url}`);
-        vscode5.window.showInformationMessage(`OpenCode GUI: server restarted (v${info.version}).`);
+        vscode7.window.showInformationMessage(`OpenCode GUI: server restarted (v${info.version}).`);
       } catch (err) {
         renderStatus(false, `Restart failed: ${formatError(err)}`);
-        vscode5.window.showWarningMessage(`OpenCode GUI: restart failed: ${formatError(err)}`);
+        vscode7.window.showWarningMessage(`OpenCode GUI: restart failed: ${formatError(err)}`);
       }
     })
   );
   context.subscriptions.push(
-    vscode5.commands.registerCommand("opencode-gui.openPanel", async () => {
-      await vscode5.commands.executeCommand(`${VIEW_ID}.focus`).then(
+    vscode7.commands.registerCommand("opencode-gui.openPanel", async () => {
+      await vscode7.commands.executeCommand(`${VIEW_ID}.focus`).then(
         () => void 0,
-        () => vscode5.window.showInformationMessage("OpenCode GUI: open the sidebar and pick OpenCode GUI > Chat.")
+        () => vscode7.window.showInformationMessage("OpenCode GUI: open the sidebar and pick OpenCode GUI > Chat.")
       );
     })
   );
   context.subscriptions.push(
-    vscode5.commands.registerCommand("opencode-gui.addSelection", async () => {
-      const editor = vscode5.window.activeTextEditor;
+    vscode7.commands.registerCommand("opencode-gui.addSelection", async () => {
+      const editor = vscode7.window.activeTextEditor;
       if (!editor) {
-        vscode5.window.showWarningMessage("OpenCode GUI: no active editor selection.");
+        vscode7.window.showWarningMessage("OpenCode GUI: no active editor selection.");
         return;
       }
       const sel = editor.selection;
       const text = editor.document.getText(sel);
       if (!text) {
-        vscode5.window.showWarningMessage("OpenCode GUI: selection is empty.");
+        vscode7.window.showWarningMessage("OpenCode GUI: selection is empty.");
         return;
       }
       const payload = {
@@ -6641,7 +7438,7 @@ var ChatViewProvider = class {
       workspaceDir,
       onAuthChanged: () => this.refreshAuthCatalogs(),
       openExternal: async (url) => {
-        await vscode5.env.openExternal(vscode5.Uri.parse(url));
+        await vscode7.env.openExternal(vscode7.Uri.parse(url));
       }
     });
   }
@@ -6651,6 +7448,8 @@ var ChatViewProvider = class {
   previewCache = /* @__PURE__ */ new Map();
   /** Drops identical history reposts (#16); reset when the webview reloads. */
   historyGate = new HistoryPostGate();
+  /** Microphone recorder: one take at a time, killed when the panel closes. */
+  dictation = new DictationRecorder();
   /** Provider-connect flows (oauth / CLI command) live in AuthController. */
   auth;
   get currentSessionID() {
@@ -6714,8 +7513,8 @@ var ChatViewProvider = class {
       return [];
     }
     const escaped = name.replace(/[\\*?[\]{}()!+@]/g, (c) => `\\${c}`);
-    const uris = await vscode5.workspace.findFiles(`**/${escaped}`, "**/node_modules/**", 20);
-    return uris.map((u) => path6.relative(this.workspaceDir, u.fsPath)).sort((a, b) => a.length - b.length || a.localeCompare(b));
+    const uris = await vscode7.workspace.findFiles(`**/${escaped}`, "**/node_modules/**", 20);
+    return uris.map((u) => path8.relative(this.workspaceDir, u.fsPath)).sort((a, b) => a.length - b.length || a.localeCompare(b));
   }
   async refreshSessions() {
     if (!this.workspaceDir) {
@@ -6724,9 +7523,15 @@ var ChatViewProvider = class {
     }
     try {
       const sessions = await listSessions(this.workspaceDir);
-      this.post({ type: "sessions", sessions: sessions.map(sessionToView) });
-      this.knownSessionIDs = sessions.map((s) => s.id);
-      void this.fillPreviews(sessions.map((s) => s.id));
+      const topLevel = sessions.filter((s) => !s.parentID);
+      this.post({ type: "sessions", sessions: topLevel.map(sessionToView) });
+      this.knownSessionIDs = topLevel.map((s) => s.id);
+      for (const s of sessions) {
+        if (s.parentID) {
+          this.childParents.set(s.id, s.parentID);
+        }
+      }
+      void this.fillPreviews(topLevel.map((s) => s.id));
       void this.pollAttention();
     } catch (err) {
       this.post({ type: "error", message: `Failed to list sessions: ${formatError(err)}` });
@@ -6807,6 +7612,9 @@ var ChatViewProvider = class {
       const messages = await listMessages(sessionID, { full: true });
       const views = messages.map(messageToView).filter((m) => m !== null);
       const compactions = countCompactions(messages);
+      if (messages.some(hasSubagentCall)) {
+        this.scheduleSubagentRefresh();
+      }
       if (!this.historyGate.accept({ sessionID, compactions, views })) {
         return;
       }
@@ -6820,27 +7628,187 @@ var ChatViewProvider = class {
       this.post({ type: "error", message: `Failed to load messages: ${formatError(err)}` });
     }
   }
+  // --- Subagents -------------------------------------------------------------
+  //
+  // A subagent call spawns a real child session. The panel renders that child
+  // inside the parent's card, so the child is NOT a tab: `refreshSessions`
+  // already asks the server for top-level chats only. What is left for the host
+  // is to know which sessions are children (to route their events and their
+  // permission asks into the parent) and to ship their transcripts to the card.
+  /** childID -> parentID, for the chats this panel has looked at. */
+  childParents = /* @__PURE__ */ new Map();
+  /** Rendered children, kept so a finished child is not refetched forever. */
+  subagentCache = /* @__PURE__ */ new Map();
+  /** What the webview already has, so a refresh only posts what changed. */
+  subagentSent = /* @__PURE__ */ new Map();
+  subagentSyncSession;
+  subagentForceFull = false;
+  subagentTimer;
+  subagentDisposed = { closed: false };
+  /** True when `sessionID` is a child of the chat on screen. */
+  isChildSession(sessionID) {
+    return this.sessionID !== void 0 && this.childParents.get(sessionID) === this.sessionID;
+  }
+  /** Parent of a child session, whether or not it is the chat on screen. */
+  childParent(sessionID) {
+    return this.childParents.get(sessionID);
+  }
+  /** Children of one chat known to this panel. */
+  childIDsOf(parentID) {
+    const ids = [];
+    for (const [child, parent] of this.childParents) {
+      if (parent === parentID) {
+        ids.push(child);
+      }
+    }
+    return ids;
+  }
+  /**
+   * A child session was just announced. Its events arrive before any list
+   * refresh would have told us about it, so remember the link right away and
+   * ask for a card refresh.
+   */
+  noteChildSession(parentID, childID) {
+    if (!parentID || !childID) {
+      return;
+    }
+    this.childParents.set(childID, parentID);
+    if (parentID === this.sessionID) {
+      this.scheduleSubagentRefresh();
+    }
+  }
+  /**
+   * Coalesce card refreshes. `full` (a reloaded webview, a switched chat) must
+   * survive the coalescing window, hence the sticky flag.
+   */
+  scheduleSubagentRefresh(full = false) {
+    this.subagentForceFull = this.subagentForceFull || full;
+    if (this.subagentTimer) {
+      return;
+    }
+    this.subagentTimer = setTimeout(() => {
+      this.subagentTimer = void 0;
+      const force = this.subagentForceFull;
+      this.subagentForceFull = false;
+      void this.refreshSubagents(force);
+    }, SUBAGENT_REFRESH_MS);
+  }
+  /** Cancels a pending card refresh (the panel or the extension is going away). */
+  disposeSubagents() {
+    this.subagentDisposed.closed = true;
+    if (this.subagentTimer) {
+      clearTimeout(this.subagentTimer);
+      this.subagentTimer = void 0;
+    }
+  }
+  /**
+   * Post the child sessions of the visible chat to the panel.
+   *
+   * Only changed cards are posted — a running child rewrites its step list on
+   * every tool call, which would otherwise repost every finished sibling too.
+   */
+  async refreshSubagents(full = false) {
+    const parentID = this.sessionID;
+    if (this.subagentDisposed.closed || !parentID || !this.workspaceDir) {
+      return;
+    }
+    if (this.subagentSyncSession !== parentID) {
+      this.subagentSyncSession = parentID;
+      this.subagentSent.clear();
+      this.subagentCache.clear();
+      for (const [child, parent] of [...this.childParents]) {
+        if (parent !== parentID) {
+          this.childParents.delete(child);
+        }
+      }
+      full = true;
+    }
+    try {
+      const children = (await listChildSessions(this.workspaceDir, parentID)).slice(0, SUBAGENT_MAX_CHILDREN);
+      const alive = new Set(children.map((c) => c.id));
+      for (const child of children) {
+        this.childParents.set(child.id, parentID);
+      }
+      for (const id of [...this.subagentCache.keys()]) {
+        if (!alive.has(id)) {
+          this.subagentCache.delete(id);
+        }
+      }
+      const views = [];
+      for (const child of children) {
+        const cached = this.subagentCache.get(child.id);
+        if (cached && cached.status !== "running") {
+          views.push(cached);
+          continue;
+        }
+        const view = subagentToView(child, await listMessages(child.id));
+        this.subagentCache.set(child.id, view);
+        views.push(view);
+      }
+      const changed = [];
+      for (const view of views) {
+        const serialized = JSON.stringify(view);
+        if (!full && this.subagentSent.get(view.sessionID) === serialized) {
+          continue;
+        }
+        this.subagentSent.set(view.sessionID, serialized);
+        changed.push(view);
+      }
+      if (changed.length > 0) {
+        this.post({ type: "subagents", sessionID: parentID, items: changed });
+      }
+    } catch (err) {
+      diagError("subagents", err);
+    }
+  }
   async refreshPermissions() {
-    if (!this.sessionID) {
+    const sessionID = this.sessionID;
+    if (!sessionID) {
       return;
     }
     try {
-      const pending = await listPermissions(this.sessionID);
-      this.post({ type: "permissions", sessionID: this.sessionID, permissions: pending.map(permissionToView) });
+      const own = await listPermissions(sessionID);
+      const fromChildren = await this.childPending(sessionID, listPermissions);
+      this.post({
+        type: "permissions",
+        sessionID,
+        permissions: [...own, ...fromChildren].map(permissionToView)
+      });
     } catch (err) {
       this.post({ type: "error", message: `Failed to load permissions: ${formatError(err)}` });
     }
   }
   async refreshForms() {
-    if (!this.sessionID) {
+    const sessionID = this.sessionID;
+    if (!sessionID) {
       return;
     }
     try {
-      const pending = await listForms(this.sessionID);
-      this.post({ type: "forms", sessionID: this.sessionID, forms: pending.map(formToView) });
+      const own = await listForms(sessionID);
+      const fromChildren = await this.childPending(sessionID, listForms);
+      this.post({ type: "forms", sessionID, forms: [...own, ...fromChildren].map(formToView) });
     } catch (err) {
       this.post({ type: "error", message: `Failed to load questions: ${formatError(err)}` });
     }
+  }
+  /**
+   * Pending items of the chat's own children, restamped with the parent's id so
+   * they render (and get answered) in the chat that spawned them. Answering goes
+   * by request id, so the restamp only affects where the card is shown.
+   */
+  async childPending(parentID, fetch2) {
+    const children = this.childIDsOf(parentID).slice(0, SUBAGENT_MAX_CHILDREN);
+    const results = await Promise.all(
+      children.map(async (child) => {
+        try {
+          const items = await fetch2(child);
+          return items.map((item) => ({ ...item, sessionID: parentID }));
+        } catch {
+          return [];
+        }
+      })
+    );
+    return results.flat();
   }
   async refreshProviders() {
     try {
@@ -6865,12 +7833,12 @@ var ChatViewProvider = class {
   async openSessionDiff(file) {
     const sessionID = this.sessionID;
     const dir = this.workspaceDir;
-    if (!sessionID || !dir || path6.isAbsolute(file)) {
+    if (!sessionID || !dir || path8.isAbsolute(file)) {
       return;
     }
-    const absolute = path6.resolve(dir, file);
-    const relative2 = path6.relative(dir, absolute);
-    if (relative2.startsWith("..") || path6.isAbsolute(relative2)) {
+    const absolute = path8.resolve(dir, file);
+    const relative3 = path8.relative(dir, absolute);
+    if (relative3.startsWith("..") || path8.isAbsolute(relative3)) {
       return;
     }
     try {
@@ -6878,12 +7846,12 @@ var ChatViewProvider = class {
       if (!diff) {
         return;
       }
-      const exists = fs4.existsSync(absolute);
-      const current = exists ? await fs4.promises.readFile(absolute, "utf8") : "";
+      const exists = fs6.existsSync(absolute);
+      const current = exists ? await fs6.promises.readFile(absolute, "utf8") : "";
       const original = diff.status === "added" ? "" : restoreOriginalFromPatch(current, diff.patch);
-      const left = await vscode5.workspace.openTextDocument({ content: original });
-      const right = exists ? vscode5.Uri.file(absolute) : (await vscode5.workspace.openTextDocument({ content: "" })).uri;
-      await vscode5.commands.executeCommand("vscode.diff", left.uri, right, `\u0418\u0437\u043C\u0435\u043D\u0435\u043D\u0438\u044F: ${file}`, { preview: false });
+      const left = await vscode7.workspace.openTextDocument({ content: original });
+      const right = exists ? vscode7.Uri.file(absolute) : (await vscode7.workspace.openTextDocument({ content: "" })).uri;
+      await vscode7.commands.executeCommand("vscode.diff", left.uri, right, `\u0418\u0437\u043C\u0435\u043D\u0435\u043D\u0438\u044F: ${file}`, { preview: false });
     } catch (err) {
       this.post({ type: "error", message: `Cannot open diff for ${file}: ${formatError(err)}` });
     }
@@ -6903,14 +7871,17 @@ var ChatViewProvider = class {
   }
   resolveWebviewView(webviewView) {
     this.view = webviewView;
+    this.subagentDisposed.closed = false;
     webviewView.webview.options = {
       enableScripts: true,
       // The panel is a single inline bundle; nothing else may be loaded from disk.
-      localResourceRoots: [vscode5.Uri.joinPath(this.extensionUri, "webview-dist")]
+      localResourceRoots: [vscode7.Uri.joinPath(this.extensionUri, "webview-dist")]
     };
     webviewView.webview.html = this.getHtml(webviewView.webview);
     webviewView.onDidDispose(() => {
       this.view = void 0;
+      this.dictation.cancel();
+      this.disposeSubagents();
     });
     webviewView.webview.onDidReceiveMessage((msg) => {
       diag("<", msg);
@@ -6942,24 +7913,26 @@ var ChatViewProvider = class {
   async handleRequest(msg) {
     if (msg.type === "ready") {
       this.historyGate.reset();
+      this.subagentSent.clear();
+      this.subagentForceFull = true;
     }
     await dispatchRequest(this, msg);
   }
   getHtml(webview) {
     const candidates = [
       // Packaged vsix layout.
-      path6.join(this.extensionUri.fsPath, "webview-dist", "index.html"),
+      path8.join(this.extensionUri.fsPath, "webview-dist", "index.html"),
       // Monorepo dev layout (F5 with extensionDevelopmentPath=packages/extension).
-      path6.join(this.extensionUri.fsPath, "..", "..", "webview", "dist", "index.html"),
+      path8.join(this.extensionUri.fsPath, "..", "..", "webview", "dist", "index.html"),
       // Legacy dev layout.
-      path6.join(
-        vscode5.Uri.joinPath(this.extensionUri, "packages", "webview", "dist", "index.html").fsPath
+      path8.join(
+        vscode7.Uri.joinPath(this.extensionUri, "packages", "webview", "dist", "index.html").fsPath
       )
     ];
     for (const p of candidates) {
       try {
-        if (fs4.existsSync(p)) {
-          const raw = fs4.readFileSync(p, "utf8");
+        if (fs6.existsSync(p)) {
+          const raw = fs6.readFileSync(p, "utf8");
           const csp = `<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src ${webview.cspSource} 'unsafe-inline'; style-src ${webview.cspSource} 'unsafe-inline'; img-src ${webview.cspSource} data: blob: https://media.pollinations.ai; media-src https://media.pollinations.ai; font-src ${webview.cspSource} data:;">`;
           return raw.replace(/<head>/i, `<head>${csp}`);
         }

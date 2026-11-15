@@ -2,7 +2,7 @@
   "name": "opencode-gui",
   "displayName": "OpenCode GUI",
   "description": "Sidebar chat panel for OpenCode: streaming answers, permission approvals, diffs with accept/reject, model picker, image attachments.",
-  "version": "0.8.25",
+  "version": "0.8.29",
   "publisher": "alexdemer07",
   "license": "MIT",
   "icon": "resources/icon-128.png",
@@ -117,6 +117,21 @@
           "type": "boolean",
           "default": false,
           "markdownDescription": "Allow Browser Tools to open `localhost` and private network addresses. Off by default: a page can prompt-inject the agent into reading local services. Reload the window after changing it (the browser bridge reads the policy when it starts)."
+        },
+        "opencode-gui.dictationLanguage": {
+          "type": "string",
+          "default": "ru",
+          "enum": [
+            "ru",
+            "en",
+            "auto"
+          ],
+          "enumDescriptions": [
+            "Русский (по умолчанию)",
+            "Английский",
+            "Определять язык по звуку — медленнее и иногда ошибается на коротких фразах"
+          ],
+          "markdownDescription": "Язык локального распознавания речи (whisper.cpp). Модель тут ни при чём: речь превращается в текст до отправки."
         }
       }
     }
