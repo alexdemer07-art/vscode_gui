@@ -2,7 +2,7 @@
   "name": "opencode-gui",
   "displayName": "OpenCode GUI",
   "description": "Sidebar chat panel for OpenCode: streaming answers, permission approvals, diffs with accept/reject, model picker, image attachments.",
-  "version": "0.8.30",
+  "version": "0.8.31",
   "publisher": "alexdemer07",
   "license": "MIT",
   "icon": "resources/icon-128.png",
