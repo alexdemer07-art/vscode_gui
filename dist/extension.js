@@ -3622,10 +3622,10 @@ function isSubagentToolName(name) {
 function hasSubagentCall(msg) {
   return msg.type === "assistant" && msg.content.some((p) => p.type === "tool" && isSubagentToolName(p.name));
 }
-var SUBAGENT_MAX_STEPS = 8;
+var SUBAGENT_MAX_STEPS = 10;
 var SUBAGENT_TEXT_MAX_CHARS = 4e3;
 var SUBAGENT_REASONING_MAX_CHARS = 2e3;
-var SUBAGENT_MAX_CHILDREN = 8;
+var SUBAGENT_MAX_CHILDREN = 16;
 function subagentTargetOf(name, input, metadata) {
   if (!isSubagentToolName(name)) {
     return void 0;
@@ -3652,7 +3652,10 @@ function subagentSteps(messages, limit) {
       continue;
     }
     const text = msg.content.filter((p) => p.type === "text").map((p) => p.text).join("\n\n");
-    const reasoning = msg.content.filter((p) => p.type === "reasoning").map((p) => ({ text: clip(p.text, SUBAGENT_REASONING_MAX_CHARS) }));
+    const reasoning = msg.content.filter((p) => p.type === "reasoning").map((p) => {
+      const ms = p.time?.completed !== void 0 && p.time?.created !== void 0 ? Math.max(0, p.time.completed - p.time.created) : void 0;
+      return { text: clip(p.text, SUBAGENT_REASONING_MAX_CHARS), ...ms !== void 0 ? { durationMs: ms } : {} };
+    });
     const tools = msg.content.filter((p) => p.type === "tool").map((p) => {
       const st = p.state;
       return {
@@ -3663,6 +3666,9 @@ function subagentSteps(messages, limit) {
         preview: st.input ? summarizeToolInput(st.input) : void 0
       };
     });
+    if (!text.trim() && tools.length === 0 && reasoning.every((r) => !r.text.trim())) {
+      continue;
+    }
     all.push({
       id: msg.id,
       text: clip(text, SUBAGENT_TEXT_MAX_CHARS),
