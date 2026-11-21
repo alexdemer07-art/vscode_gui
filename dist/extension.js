@@ -2268,8 +2268,8 @@ var init_promise = __esm({
 
 // src/extension.ts
 import * as vscode7 from "vscode";
-import * as fs6 from "fs";
-import * as path8 from "path";
+import * as fs7 from "fs";
+import * as path9 from "path";
 
 // src/opencodeClient.ts
 init_promise();
@@ -2811,6 +2811,7 @@ var CONNECT_TIMEOUT_MS = 15e3;
 var ENSURE_TIMEOUT_MS = 12e4;
 var CALL_TIMEOUT_MS = 3e4;
 var SESSION_LIST_LIMIT = 50;
+var ACTIVITY_LIST_LIMIT = 200;
 var MESSAGE_LIST_LIMIT = 200;
 var FILE_FIND_LIMIT = 15;
 var ATTACH_MAX_BYTES = 5e6;
@@ -2936,6 +2937,14 @@ async function listChildSessions(directory, parentID) {
   const res = await callClient(
     "session.list(children)",
     (client) => client.session.list({ directory, order: "desc", limit: SESSION_LIST_LIMIT, parentID })
+  );
+  return res.data;
+}
+async function listWorkspaceSessions(directory) {
+  directory = normalizeDir(directory);
+  const res = await callClient(
+    "session.list(all)",
+    (client) => client.session.list({ directory, order: "desc", limit: ACTIVITY_LIST_LIMIT })
   );
   return res.data;
 }
@@ -3679,19 +3688,28 @@ function subagentSteps(messages, limit) {
   }
   return { steps: all.length > limit ? all.slice(all.length - limit) : all, total: all.length };
 }
+function isBusySession(session) {
+  const busy = session.time.busy;
+  if (busy === void 0) {
+    return false;
+  }
+  const idle = session.time.idle;
+  return idle === void 0 || busy > idle;
+}
 function subagentToView(child, messages) {
   const busy = child.time.busy;
   const idle = child.time.idle;
-  const running = busy !== void 0 && (idle === void 0 || busy > idle);
+  const running = isBusySession({ time: child.time });
   const status = running ? "running" : child.outcome === "failed" ? "error" : "completed";
   const { steps, total } = subagentSteps(messages, SUBAGENT_MAX_STEPS);
-  const finishedAt = running ? void 0 : idle;
+  const startedAt = busy ?? child.time.created;
+  const finishedAt = running ? void 0 : idle ?? startedAt;
   return {
     sessionID: child.id,
     agent: child.agent,
     description: child.title,
     status,
-    startedAt: child.time.created,
+    startedAt,
     ...finishedAt !== void 0 ? { finishedAt } : {},
     steps,
     totalSteps: total
@@ -3763,24 +3781,24 @@ async function diagFlush() {
   }
   diagWriting = true;
   try {
-    const fs7 = await import("node:fs");
-    const path9 = await import("node:path");
+    const fs8 = await import("node:fs");
+    const path10 = await import("node:path");
     const dir = diagStorage.fsPath;
-    fs7.mkdirSync(dir, { recursive: true });
-    const file = path9.join(dir, "opencode-gui-diag.log");
+    fs8.mkdirSync(dir, { recursive: true });
+    const file = path10.join(dir, "opencode-gui-diag.log");
     if (!diagTrimmed) {
       diagTrimmed = true;
       try {
-        const st = fs7.statSync(file);
+        const st = fs8.statSync(file);
         if (st.size > 3e5) {
-          const lines = fs7.readFileSync(file, "utf8").split("\n");
-          fs7.writeFileSync(file, lines.slice(-1500).join("\n"));
+          const lines = fs8.readFileSync(file, "utf8").split("\n");
+          fs8.writeFileSync(file, lines.slice(-1500).join("\n"));
         }
       } catch {
       }
     }
     const batch = diagQueue.splice(0, diagQueue.length);
-    fs7.appendFileSync(file, batch.join("\n") + "\n");
+    fs8.appendFileSync(file, batch.join("\n") + "\n");
   } catch {
   } finally {
     diagWriting = false;
@@ -3816,10 +3834,21 @@ function diagError(tag2, err) {
 function isChildStreamEvent(type) {
   return type.startsWith("session.text.") || type.startsWith("session.reasoning.") || type.startsWith("session.tool.") || type.startsWith("session.execution.") || type.startsWith("session.step.") || type.startsWith("session.compaction.") || type === "session.idle" || type === "session.usage.updated";
 }
+var CHILD_RUN_ENDED = /* @__PURE__ */ new Set([
+  "session.execution.succeeded",
+  "session.execution.failed",
+  "session.execution.interrupted",
+  "session.idle"
+]);
 function routeEvent(provider, event) {
   const current = provider.currentSessionID;
   const sessionID = event.data?.sessionID;
   if (sessionID && sessionID !== current && provider.isChildSession(sessionID) && isChildStreamEvent(event.type)) {
+    if (event.type === "session.execution.started") {
+      provider.noteSessionLive(sessionID, true);
+    } else if (CHILD_RUN_ENDED.has(event.type)) {
+      provider.noteSessionLive(sessionID, false);
+    }
     provider.scheduleSubagentRefresh();
     return;
   }
@@ -3909,6 +3938,7 @@ function routeEvent(provider, event) {
       break;
     }
     case "session.execution.started":
+      provider.noteSessionLive(event.data.sessionID, true);
       provider.post({ type: "execution", state: "started", sessionID: event.data.sessionID });
       break;
     case "session.execution.succeeded":
@@ -3927,6 +3957,7 @@ function routeEvent(provider, event) {
         }
       }
       provider.post(execMsg);
+      provider.noteSessionLive(event.data.sessionID, false);
       if (event.data.sessionID === current) {
         void provider.refreshCurrent();
       }
@@ -3935,6 +3966,7 @@ function routeEvent(provider, event) {
     }
     case "session.idle":
       provider.post({ type: "execution", state: "succeeded", sessionID: event.data.sessionID });
+      provider.noteSessionLive(event.data.sessionID, false);
       if (event.data.sessionID === current) {
         void provider.refreshCurrent();
       }
@@ -5241,6 +5273,249 @@ function run(exe, args, timeoutMs) {
   });
 }
 
+// src/dictation/asr.ts
+import { spawn as spawn4 } from "child_process";
+import * as fs4 from "fs";
+import * as path5 from "path";
+var PORT = Number(process.env.VOICE_ASR_PORT ?? 8791);
+var BASE_URL = `http://127.0.0.1:${PORT}`;
+var PROBE_TIMEOUT_MS = 700;
+var START_WAIT_MS = 2e4;
+var TRANSCRIBE_TIMEOUT_MS2 = 12e4;
+function engineForLanguage(language) {
+  const value = (language || "").trim().toLowerCase();
+  if (value === "en" || value === "de" || value === "fr" || value === "es") {
+    return "whisper";
+  }
+  return "either";
+}
+function serviceCandidates(workspaceDir) {
+  const out = [];
+  const fromSetting = (process.env.VOICE_ASR_DIR ?? "").trim();
+  if (fromSetting) {
+    out.push(fromSetting);
+  }
+  if (workspaceDir) {
+    out.push(path5.join(workspaceDir, "01_Processes", "voice_input"));
+  }
+  out.push(path5.join(voiceHome(), "asr"));
+  return out;
+}
+function serviceDir(workspaceDir) {
+  for (const dir of serviceCandidates(workspaceDir)) {
+    try {
+      if (fs4.existsSync(path5.join(dir, "voice_input", "asr_service.py"))) {
+        return dir;
+      }
+    } catch {
+    }
+  }
+  return void 0;
+}
+function pythonCandidates() {
+  if (process.platform !== "win32") {
+    return [["python3"]];
+  }
+  return [["pyw", "-3"], ["pythonw"], ["py", "-3"]];
+}
+async function health() {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), PROBE_TIMEOUT_MS);
+  try {
+    const response = await fetch(`${BASE_URL}/health`, { signal: controller.signal });
+    if (!response.ok) {
+      return void 0;
+    }
+    const body = await response.json();
+    return {
+      ready: body.ready === true,
+      engine: typeof body.engine === "string" ? body.engine : void 0,
+      detail: typeof body.detail === "string" ? body.detail : void 0
+    };
+  } catch {
+    return void 0;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+function sleep3(ms) {
+  return new Promise((resolve5) => setTimeout(resolve5, ms));
+}
+async function spawnService(dir) {
+  for (const [exe, ...args] of pythonCandidates()) {
+    const started = await spawnOnce(exe, [...args, "-m", "voice_input", "serve"], dir);
+    if (started) {
+      return;
+    }
+  }
+}
+function spawnOnce(exe, args, dir) {
+  return new Promise((resolve5) => {
+    let settled = false;
+    const done = (ok) => {
+      if (!settled) {
+        settled = true;
+        resolve5(ok);
+      }
+    };
+    try {
+      const child = spawn4(exe, args, { cwd: dir, windowsHide: true, detached: true, stdio: "ignore" });
+      child.once("error", () => done(false));
+      child.once("spawn", () => {
+        child.unref();
+        done(true);
+      });
+    } catch {
+      done(false);
+    }
+  });
+}
+async function waitForReady() {
+  const deadline = Date.now() + START_WAIT_MS;
+  while (Date.now() < deadline) {
+    const status = await health();
+    if (status?.ready) {
+      return true;
+    }
+    await sleep3(400);
+  }
+  return false;
+}
+function prepareService(workspaceDir) {
+  const dir = serviceDir(workspaceDir);
+  if (!dir) {
+    return;
+  }
+  void health().then((status) => {
+    if (!status) {
+      void spawnService(dir);
+    }
+  });
+}
+async function ensureService(workspaceDir) {
+  const current = await health();
+  if (current?.ready) {
+    return true;
+  }
+  if (current && !current.ready) {
+    return waitForReady();
+  }
+  const dir = serviceDir(workspaceDir);
+  if (!dir) {
+    return false;
+  }
+  await spawnService(dir);
+  return waitForReady();
+}
+async function postWav(buffer) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), TRANSCRIBE_TIMEOUT_MS2);
+  try {
+    const response = await fetch(`${BASE_URL}/transcribe`, {
+      method: "POST",
+      headers: { "content-type": "audio/wav" },
+      body: buffer,
+      signal: controller.signal
+    });
+    if (!response.ok) {
+      throw new Error(`asr service answered ${response.status}`);
+    }
+    const body = await response.json();
+    const text = typeof body.text === "string" ? body.text.trim() : "";
+    if (!text) {
+      return "";
+    }
+    return text;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+async function transcribeTake(buffer, language, workspaceDir) {
+  const preferred = engineForLanguage(language);
+  if (preferred !== "whisper" && await ensureService(workspaceDir)) {
+    try {
+      const text2 = await postWav(buffer);
+      return { text: text2, engine: "gigaam" };
+    } catch {
+    }
+  }
+  const text = await transcribeBuffer(buffer, language);
+  return { text, engine: "whisper" };
+}
+
+// src/dictation/format.ts
+var INTERJECTION = /(^|[\s,.;:!?…—–-])(?:э{2,}|э{1,}|эм+|мм+|м{3,}|а{2,}|uh+|um+|erm?|hmm+)(?=$|[\s,.;:!?…—–-])/giu;
+var LEADING_FILLER = /(^|[.!?…]\s+)\s*(?:ну|короче|значит|типа|как\s+бы|в\s+общем)\s*,\s*/giu;
+var INNER_FILLER = /([,;:])\s*(?:ну|короче|значит|типа|как\s+бы|в\s+общем)\s*,/giu;
+var STUTTER = /(?<![\p{L}\p{N}])(\p{L}{1,12})([,\s]+\1(?![\p{L}\p{N}]))+/gu;
+var TERMS = [
+  [/(?<![\p{L}])битрикс(?:24)?(?![\p{L}])/giu, "\u0411\u0438\u0442\u0440\u0438\u043A\u0441"],
+  [/(?<![\p{L}])(?:гитхаб|github)(?![\p{L}])/giu, "GitHub"],
+  [/(?<![\p{L}])(?:докер|docker)(?![\p{L}])/giu, "Docker"],
+  [/(?<![\p{L}])(?:питон|python)(?![\p{L}])/giu, "Python"],
+  [/(?<![\p{L}])(?:джаваскрипт|javascript)(?![\p{L}])/giu, "JavaScript"],
+  [/(?<![\p{L}])(?:тайпскрипт|typescript)(?![\p{L}])/giu, "TypeScript"],
+  [/(?<![\p{L}])гигаам(?![\p{L}])/giu, "GigaAM"],
+  [/(?<![\p{L}])звену(?![\p{L}])/giu, "Zveno"],
+  [/(?<![\p{L}])обсидиан(?![\p{L}])/giu, "Obsidian"],
+  [/(?<![\p{L}])опенкод(?![\p{L}])/giu, "OpenCode"]
+];
+function collapseStutter(text) {
+  let current = text;
+  for (let i = 0; i < 4; i += 1) {
+    const next = current.replace(STUTTER, "$1");
+    if (next === current) {
+      return current;
+    }
+    current = next;
+  }
+  return current;
+}
+function capitalizeSentences(text) {
+  return text.replace(
+    /(^|[.!?…]\s+)(\p{Ll})/gu,
+    (_match, lead, letter) => lead + letter.toUpperCase()
+  );
+}
+function normalizePunctuation(text) {
+  let out = text.replace(/\s+/g, " ");
+  out = out.replace(/\s+([,.;:!?…])/g, "$1");
+  out = out.replace(/([,;:!?…])(?=[\p{L}\p{N}])/gu, "$1 ");
+  out = out.replace(/([,;:])(?:\s*\1)+/g, "$1");
+  out = out.replace(/([.!?…]){2,}/g, "$1");
+  out = out.replace(/^[\s,.–—-]+/u, "");
+  return out.trim();
+}
+function stripLeadingFillers(text) {
+  let current = text;
+  for (let i = 0; i < 4; i += 1) {
+    const next = current.replace(LEADING_FILLER, "$1").replace(/^[\s,.–—-]+/u, "");
+    if (next === current) {
+      return current;
+    }
+    current = next;
+  }
+  return current;
+}
+function formatDictation(raw) {
+  if (!raw.trim()) {
+    return "";
+  }
+  let text = raw.replace(/\s+/g, " ").trim();
+  text = text.replace(INTERJECTION, "$1");
+  text = stripLeadingFillers(text);
+  text = text.replace(INNER_FILLER, "$1");
+  text = collapseStutter(text);
+  for (const [pattern, replacement] of TERMS) {
+    text = text.replace(pattern, replacement);
+  }
+  text = normalizePunctuation(text);
+  if (!text) {
+    return "";
+  }
+  return capitalizeSentences(text);
+}
+
 // src/handlers/dictation.ts
 function dictationLanguage() {
   const value = vscode3.workspace.getConfiguration("opencode-gui").get("dictationLanguage");
@@ -5253,7 +5528,11 @@ var dictationHandlers = {
       return;
     }
     try {
-      await ensureInstalledInteractive();
+      if (serviceDir(ctx.workspaceDir)) {
+        prepareService(ctx.workspaceDir);
+      } else {
+        await ensureInstalledInteractive();
+      }
       await ctx.dictation.start();
       ctx.post({ type: "recording", state: "started", startedAt: Date.now() });
     } catch (err) {
@@ -5265,6 +5544,7 @@ var dictationHandlers = {
       ctx.post({ type: "recording", state: "failed", message: "\u0417\u0430\u043F\u0438\u0441\u044C \u0443\u0436\u0435 \u043E\u0441\u0442\u0430\u043D\u043E\u0432\u043B\u0435\u043D\u0430." });
       return;
     }
+    ctx.post({ type: "recording", state: "stopping" });
     try {
       const result = await ctx.dictation.stop();
       if (!result) {
@@ -5276,7 +5556,9 @@ var dictationHandlers = {
         ctx.post({ type: "error", message: "\u0412 \u0437\u0430\u043F\u0438\u0441\u0438 \u0442\u0438\u0448\u0438\u043D\u0430: \u043F\u043E\u0445\u043E\u0436\u0435, \u043C\u0438\u043A\u0440\u043E\u0444\u043E\u043D \u0432\u044B\u043A\u043B\u044E\u0447\u0435\u043D \u0438\u043B\u0438 \u0437\u0430\u043C\u044C\u044E\u0447\u0435\u043D \u0432 Windows." });
         return;
       }
-      const text = await transcribeBuffer(result.buffer, dictationLanguage());
+      ctx.post({ type: "recording", state: "transcribing" });
+      const take = await transcribeTake(result.buffer, dictationLanguage(), ctx.workspaceDir);
+      const text = formatDictation(take.text);
       ctx.post({ type: "recording", state: "stopped" });
       if (!text) {
         ctx.post({ type: "error", message: "\u041D\u0435 \u0440\u0430\u0437\u043E\u0431\u0440\u0430\u043B \u0440\u0435\u0447\u044C \u2014 \u043F\u043E\u043F\u0440\u043E\u0431\u0443\u0439 \u0435\u0449\u0451 \u0440\u0430\u0437, \u0431\u043B\u0438\u0436\u0435 \u043A \u043C\u0438\u043A\u0440\u043E\u0444\u043E\u043D\u0443." });
@@ -5332,18 +5614,18 @@ var diffHandlers = {
 };
 
 // src/handlers/files.ts
-import * as fs4 from "fs";
-import * as path6 from "path";
+import * as fs5 from "fs";
+import * as path7 from "path";
 import * as vscode4 from "vscode";
 
 // src/openPath.ts
-import * as path5 from "path";
+import * as path6 from "path";
 var MAX_REF_CHARS = 2048;
 function sameOrInside(target, root) {
   const win = process.platform === "win32";
   const t = win ? target.toLowerCase() : target;
   const r = win ? root.toLowerCase() : root;
-  return t === r || t.startsWith(r + path5.sep);
+  return t === r || t.startsWith(r + path6.sep);
 }
 async function resolveOpenTarget(raw, workspaceDir, deps) {
   const ref = typeof raw === "string" ? raw.trim() : "";
@@ -5353,7 +5635,7 @@ async function resolveOpenTarget(raw, workspaceDir, deps) {
   if (!workspaceDir) {
     return void 0;
   }
-  const root = path5.resolve(workspaceDir);
+  const root = path6.resolve(workspaceDir);
   const probe = (target) => {
     if (!sameOrInside(target, root)) {
       return void 0;
@@ -5363,17 +5645,17 @@ async function resolveOpenTarget(raw, workspaceDir, deps) {
     }
     return { kind: deps.isDirectory(target) ? "directory" : "file", path: target };
   };
-  const direct = path5.isAbsolute(ref) ? path5.normalize(ref) : path5.resolve(root, ref);
+  const direct = path6.isAbsolute(ref) ? path6.normalize(ref) : path6.resolve(root, ref);
   const hit = probe(direct);
   if (hit) {
     return hit;
   }
-  const name = path5.basename(ref);
+  const name = path6.basename(ref);
   if (!name || name === "." || name === "..") {
     return void 0;
   }
   for (const rel of await deps.findByName(name)) {
-    const found = probe(path5.resolve(root, rel));
+    const found = probe(path6.resolve(root, rel));
     if (found) {
       return found;
     }
@@ -5392,10 +5674,10 @@ function resolveDropTarget(raw, workspaceDir) {
       return "outside";
     }
     abs = fsPath;
-  } else if (path6.isAbsolute(raw) || WIN_ABS_RE.test(raw)) {
+  } else if (path7.isAbsolute(raw) || WIN_ABS_RE.test(raw)) {
     abs = raw;
   } else {
-    abs = path6.resolve(workspaceDir, raw);
+    abs = path7.resolve(workspaceDir, raw);
   }
   const rel = relativeInside(abs, workspaceDir);
   if (rel === void 0) {
@@ -5403,22 +5685,22 @@ function resolveDropTarget(raw, workspaceDir) {
   }
   let stat;
   try {
-    stat = fs4.statSync(abs);
+    stat = fs5.statSync(abs);
   } catch {
     return "missing";
   }
   return { abs, rel, kind: stat.isDirectory() ? "directory" : "file" };
 }
 function relativeInside(abs, workspaceDir) {
-  const root = path6.resolve(workspaceDir);
-  const rel = path6.relative(root, path6.resolve(abs));
+  const root = path7.resolve(workspaceDir);
+  const rel = path7.relative(root, path7.resolve(abs));
   if (!rel) {
     return ".";
   }
-  if (rel.startsWith("..") || path6.isAbsolute(rel)) {
+  if (rel.startsWith("..") || path7.isAbsolute(rel)) {
     return void 0;
   }
-  return rel.split(path6.sep).join("/");
+  return rel.split(path7.sep).join("/");
 }
 var fileHandlers = {
   async findFiles(ctx, msg) {
@@ -5437,7 +5719,7 @@ var fileHandlers = {
         reqID: typeof reqID === "string" ? reqID : void 0,
         query,
         files: found.filter((f) => f.type === "file").map((f) => {
-          const abs = path6.join(dir, f.path);
+          const abs = path7.join(dir, f.path);
           return { path: f.path, uri: toFileUri(abs) };
         })
       });
@@ -5480,10 +5762,10 @@ var fileHandlers = {
       return;
     }
     const target = await resolveOpenTarget(file, dir, {
-      exists: (p) => fs4.existsSync(p),
+      exists: (p) => fs5.existsSync(p),
       isDirectory: (p) => {
         try {
-          return fs4.statSync(p).isDirectory();
+          return fs5.statSync(p).isDirectory();
         } catch {
           return false;
         }
@@ -5624,10 +5906,12 @@ var sessionHandlers = {
   async ready(ctx) {
     await ctx.refreshSessions();
     await ctx.refreshAuthCatalogs();
+    await ctx.refreshLiveSessions();
     const sessionID = ctx.sessionID;
     if (!sessionID) {
       return;
     }
+    ctx.resetSubagentCards();
     ctx.post({ type: "sessionSelected", sessionID });
     await ctx.refreshCurrent();
     await ctx.refreshPermissions();
@@ -5644,6 +5928,7 @@ var sessionHandlers = {
     }
     const id = await ctx.createSessionWithStoredPrefs();
     ctx.sessionID = id;
+    ctx.resetSubagentCards();
     ctx.post({ type: "sessionSelected", sessionID: id });
     await ctx.refreshSessions();
     await ctx.refreshCurrent();
@@ -5655,6 +5940,7 @@ var sessionHandlers = {
       return;
     }
     ctx.sessionID = id;
+    ctx.resetSubagentCards();
     ctx.post({ type: "sessionSelected", sessionID: id });
     await ctx.refreshCurrent();
     await ctx.refreshPermissions();
@@ -5684,6 +5970,7 @@ var sessionHandlers = {
     }
     if (ctx.sessionID === id) {
       ctx.sessionID = void 0;
+      ctx.resetSubagentCards();
       ctx.onModel(void 0);
       ctx.post({ type: "sessionSelected", sessionID: null, deletedID: id });
     }
@@ -5782,10 +6069,10 @@ async function dispatchRequest(ctx, msg) {
 
 // src/browserTools.ts
 import * as vscode6 from "vscode";
-import * as fs5 from "node:fs";
+import * as fs6 from "node:fs";
 import * as os3 from "node:os";
-import * as path7 from "node:path";
-import { spawn as spawn4 } from "node:child_process";
+import * as path8 from "node:path";
+import { spawn as spawn5 } from "node:child_process";
 
 // ../../node_modules/jsonc-parser/lib/esm/impl/scanner.js
 function createScanner(text, ignoreTrivia = false) {
@@ -6575,12 +6862,12 @@ function parseTree(text, errors = [], options = ParseOptions.DEFAULT) {
   }
   return result;
 }
-function findNodeAtLocation(root, path9) {
+function findNodeAtLocation(root, path10) {
   if (!root) {
     return void 0;
   }
   let node = root;
-  for (let segment of path9) {
+  for (let segment of path10) {
     if (typeof segment === "string") {
       if (node.type !== "object" || !Array.isArray(node.children)) {
         return void 0;
@@ -6934,14 +7221,14 @@ function getNodeType(value) {
 
 // ../../node_modules/jsonc-parser/lib/esm/impl/edit.js
 function setProperty(text, originalPath, value, options) {
-  const path9 = originalPath.slice();
+  const path10 = originalPath.slice();
   const errors = [];
   const root = parseTree(text, errors);
   let parent = void 0;
   let lastSegment = void 0;
-  while (path9.length > 0) {
-    lastSegment = path9.pop();
-    parent = findNodeAtLocation(root, path9);
+  while (path10.length > 0) {
+    lastSegment = path10.pop();
+    parent = findNodeAtLocation(root, path10);
     if (parent === void 0 && value !== void 0) {
       if (typeof lastSegment === "string") {
         value = { [lastSegment]: value };
@@ -7127,8 +7414,8 @@ var ParseErrorCode;
   ParseErrorCode2[ParseErrorCode2["InvalidEscapeCharacter"] = 15] = "InvalidEscapeCharacter";
   ParseErrorCode2[ParseErrorCode2["InvalidCharacter"] = 16] = "InvalidCharacter";
 })(ParseErrorCode || (ParseErrorCode = {}));
-function modify(text, path9, value, options) {
-  return setProperty(text, path9, value, options);
+function modify(text, path10, value, options) {
+  return setProperty(text, path10, value, options);
 }
 function applyEdits(text, edits) {
   let sortedEdits = edits.slice(0).sort((a, b) => {
@@ -7152,11 +7439,11 @@ function applyEdits(text, edits) {
 }
 
 // src/browserTools.ts
-var stateFile = path7.join(os3.homedir(), ".opencode-gui", "browser-bridge.json");
-function chooseOpenCodeConfigFile(dir, exists = fs5.existsSync) {
-  const jsonc = path7.join(dir, "opencode.jsonc");
+var stateFile = path8.join(os3.homedir(), ".opencode-gui", "browser-bridge.json");
+function chooseOpenCodeConfigFile(dir, exists = fs6.existsSync) {
+  const jsonc = path8.join(dir, "opencode.jsonc");
   if (exists(jsonc)) return jsonc;
-  const json2 = path7.join(dir, "opencode.json");
+  const json2 = path8.join(dir, "opencode.json");
   return exists(json2) ? json2 : jsonc;
 }
 function addBrowserPluginToConfig(source, pluginPath) {
@@ -7174,14 +7461,14 @@ function addBrowserPluginToConfig(source, pluginPath) {
 }
 function readState() {
   try {
-    const state = JSON.parse(fs5.readFileSync(stateFile, "utf8"));
+    const state = JSON.parse(fs6.readFileSync(stateFile, "utf8"));
     const url = new URL(state.url);
     if (url.protocol === "http:" && url.hostname === "127.0.0.1" && /^[a-f0-9]{64}$/.test(state.token)) return state;
   } catch {
   }
   return void 0;
 }
-async function health(state = readState()) {
+async function health2(state = readState()) {
   if (!state) return false;
   try {
     const response = await fetch(new URL("/health", state.url), {
@@ -7199,33 +7486,33 @@ var BrowserTools = class {
   }
   child;
   async enable() {
-    const asset = path7.join(this.context.extensionPath, "browser-runtime", "plugin");
-    const target = path7.join(this.context.globalStorageUri.fsPath, "browser-plugin");
-    const configFile = chooseOpenCodeConfigFile(path7.join(os3.homedir(), ".config", "opencode"));
-    if (!fs5.existsSync(path7.join(asset, "index.mjs"))) throw new Error("Bundled browser plugin is missing");
+    const asset = path8.join(this.context.extensionPath, "browser-runtime", "plugin");
+    const target = path8.join(this.context.globalStorageUri.fsPath, "browser-plugin");
+    const configFile = chooseOpenCodeConfigFile(path8.join(os3.homedir(), ".config", "opencode"));
+    if (!fs6.existsSync(path8.join(asset, "index.mjs"))) throw new Error("Bundled browser plugin is missing");
     const answer = await vscode6.window.showWarningMessage(
       `Enable Browser Tools in ${configFile}? This adds the local plugin to the global OpenCode config.`,
       { modal: true },
       "Enable Browser Tools"
     );
     if (answer !== "Enable Browser Tools") return;
-    fs5.mkdirSync(target, { recursive: true });
-    fs5.copyFileSync(path7.join(asset, "index.mjs"), path7.join(target, "index.mjs"));
-    fs5.copyFileSync(path7.join(asset, "package.json"), path7.join(target, "package.json"));
-    fs5.mkdirSync(path7.dirname(configFile), { recursive: true });
-    const original = fs5.existsSync(configFile) ? fs5.readFileSync(configFile, "utf8") : "{}\n";
+    fs6.mkdirSync(target, { recursive: true });
+    fs6.copyFileSync(path8.join(asset, "index.mjs"), path8.join(target, "index.mjs"));
+    fs6.copyFileSync(path8.join(asset, "package.json"), path8.join(target, "package.json"));
+    fs6.mkdirSync(path8.dirname(configFile), { recursive: true });
+    const original = fs6.existsSync(configFile) ? fs6.readFileSync(configFile, "utf8") : "{}\n";
     const updated = addBrowserPluginToConfig(original, target.replace(/\\/g, "/"));
-    if (updated !== original) fs5.writeFileSync(configFile, updated, "utf8");
+    if (updated !== original) fs6.writeFileSync(configFile, updated, "utf8");
     vscode6.window.showInformationMessage("Browser Tools enabled. Restart OpenCode, then start a new session to load the plugin.");
   }
   async start() {
-    if (!await health()) {
-      const script = path7.join(this.context.extensionPath, "browser-runtime", "bridge", "main.cjs");
-      if (!fs5.existsSync(script)) throw new Error("Bundled browser bridge is missing");
+    if (!await health2()) {
+      const script = path8.join(this.context.extensionPath, "browser-runtime", "bridge", "main.cjs");
+      if (!fs6.existsSync(script)) throw new Error("Bundled browser bridge is missing");
       if (this.child && this.child.exitCode === null) this.dispose();
       const allowPrivate = vscode6.workspace.getConfiguration("opencode-gui").get("browser.allowPrivateNetworks", false);
       let spawnError;
-      const child = spawn4(process.execPath, [script], {
+      const child = spawn5(process.execPath, [script], {
         env: {
           ...process.env,
           ELECTRON_RUN_AS_NODE: "1",
@@ -7241,7 +7528,7 @@ var BrowserTools = class {
       let ready = false;
       for (let i = 0; i < 100; i++) {
         if (spawnError) throw spawnError;
-        if (await health()) {
+        if (await health2()) {
           ready = true;
           break;
         }
@@ -7270,7 +7557,7 @@ var BrowserTools = class {
   }
   async status() {
     const state = readState();
-    if (!state || !await health(state)) {
+    if (!state || !await health2(state)) {
       vscode6.window.showInformationMessage("Browser Tools: bridge stopped. Run Start Browser Tools.");
       return;
     }
@@ -7292,7 +7579,7 @@ var BrowserTools = class {
     const forceKill = () => {
       if (child.exitCode !== null) return;
       if (process.platform === "win32" && child.pid) {
-        spawn4("taskkill", ["/pid", String(child.pid), "/t", "/f"], { stdio: "ignore", windowsHide: true });
+        spawn5("taskkill", ["/pid", String(child.pid), "/t", "/f"], { stdio: "ignore", windowsHide: true });
       } else {
         child.kill("SIGKILL");
       }
@@ -7424,6 +7711,7 @@ Model: ${statusModel}` : detail;
   context.subscriptions.push({ dispose: stopEvents });
   const attentionTimer = setInterval(() => {
     void provider.pollAttention();
+    void provider.refreshLiveSessions();
   }, ATTENTION_POLL_MS);
   context.subscriptions.push({ dispose: () => clearInterval(attentionTimer) });
   await refreshStatus();
@@ -7520,7 +7808,7 @@ var ChatViewProvider = class {
     }
     const escaped = name.replace(/[\\*?[\]{}()!+@]/g, (c) => `\\${c}`);
     const uris = await vscode7.workspace.findFiles(`**/${escaped}`, "**/node_modules/**", 20);
-    return uris.map((u) => path8.relative(this.workspaceDir, u.fsPath)).sort((a, b) => a.length - b.length || a.localeCompare(b));
+    return uris.map((u) => path9.relative(this.workspaceDir, u.fsPath)).sort((a, b) => a.length - b.length || a.localeCompare(b));
   }
   async refreshSessions() {
     if (!this.workspaceDir) {
@@ -7708,6 +7996,102 @@ var ChatViewProvider = class {
     }
   }
   /**
+   * Forget every card the panel was told about.
+   *
+   * The webview drops its cards on `sessionSelected` (they belong to the chat
+   * that spawned them) and on a reload. This host-side memory of "what was
+   * already sent" does not travel with it: without this reset the first sweep
+   * after coming back finds every child unchanged, posts nothing, and the chat
+   * reopens with no strip and no cards — a swarm can be running with the panel
+   * showing silence.
+   */
+  resetSubagentCards() {
+    this.subagentSent.clear();
+    this.subagentCache.clear();
+    this.subagentSyncSession = void 0;
+    this.subagentForceFull = true;
+  }
+  // --- Who is working ---------------------------------------------------------
+  //
+  // The tab bar animates a chat while it runs, but a chat whose own turn ended
+  // can still have a subagent working in a child session. Those runs are
+  // separate sessions, so their `execution` events carry the child's id and no
+  // tab matches: the snake never started while work was going on (live report
+  // 2026-11-21). The host therefore answers one question per chat — "does it have
+  // live work, its own or its children's" — and the panel only renders it.
+  /** Sessions the server reports as mid-run right now. */
+  liveSessions = /* @__PURE__ */ new Set();
+  /** What the panel was last told per chat, so the flag is posted on change. */
+  tabBusy = /* @__PURE__ */ new Map();
+  /** The chat a session belongs to: itself, or the root of its child links. */
+  chatOf(sessionID) {
+    let id = sessionID;
+    for (let depth = 0; depth < 8; depth++) {
+      const parent = this.childParents.get(id);
+      if (!parent) {
+        return id;
+      }
+      id = parent;
+    }
+    return id;
+  }
+  /** The server said this session started or finished a run. */
+  noteSessionLive(sessionID, live) {
+    if (!sessionID) {
+      return;
+    }
+    if (live) {
+      this.liveSessions.add(sessionID);
+    } else {
+      this.liveSessions.delete(sessionID);
+    }
+    this.publishTabBusy();
+  }
+  /**
+   * Rebuild the live set from the server. Events only cover runs the panel saw
+   * start, so a run that began before the panel opened (or during a stream gap)
+   * would otherwise leave its tab silent.
+   */
+  async refreshLiveSessions() {
+    if (!this.workspaceDir) {
+      return;
+    }
+    try {
+      const sessions = await listWorkspaceSessions(this.workspaceDir);
+      this.liveSessions.clear();
+      for (const session of sessions) {
+        if (session.parentID) {
+          this.childParents.set(session.id, session.parentID);
+        }
+        if (isBusySession(session)) {
+          this.liveSessions.add(session.id);
+        }
+      }
+      this.publishTabBusy();
+    } catch (err) {
+      diagError("live sessions", err);
+    }
+  }
+  /** One flag per chat, posted only when it flips. */
+  publishTabBusy() {
+    const next = /* @__PURE__ */ new Set();
+    for (const id of this.liveSessions) {
+      next.add(this.chatOf(id));
+    }
+    for (const chat of next) {
+      if (this.tabBusy.get(chat) !== true) {
+        this.tabBusy.set(chat, true);
+        this.post({ type: "tabBusy", sessionID: chat, busy: true });
+      }
+    }
+    for (const chat of [...this.tabBusy.keys()]) {
+      if (!next.has(chat)) {
+        this.tabBusy.delete(chat);
+        this.post({ type: "tabBusy", sessionID: chat, busy: false });
+      }
+    }
+  }
+  /**
    * Post the child sessions of the visible chat to the panel.
    *
    * Only changed cards are posted — a running child rewrites its step list on
@@ -7743,7 +8127,7 @@ var ChatViewProvider = class {
       const views = [];
       for (const child of children) {
         const cached = this.subagentCache.get(child.id);
-        if (cached && cached.status !== "running") {
+        if (cached && cached.status !== "running" && !isBusySession(child)) {
           views.push(cached);
           continue;
         }
@@ -7839,12 +8223,12 @@ var ChatViewProvider = class {
   async openSessionDiff(file) {
     const sessionID = this.sessionID;
     const dir = this.workspaceDir;
-    if (!sessionID || !dir || path8.isAbsolute(file)) {
+    if (!sessionID || !dir || path9.isAbsolute(file)) {
       return;
     }
-    const absolute = path8.resolve(dir, file);
-    const relative3 = path8.relative(dir, absolute);
-    if (relative3.startsWith("..") || path8.isAbsolute(relative3)) {
+    const absolute = path9.resolve(dir, file);
+    const relative3 = path9.relative(dir, absolute);
+    if (relative3.startsWith("..") || path9.isAbsolute(relative3)) {
       return;
     }
     try {
@@ -7852,8 +8236,8 @@ var ChatViewProvider = class {
       if (!diff) {
         return;
       }
-      const exists = fs6.existsSync(absolute);
-      const current = exists ? await fs6.promises.readFile(absolute, "utf8") : "";
+      const exists = fs7.existsSync(absolute);
+      const current = exists ? await fs7.promises.readFile(absolute, "utf8") : "";
       const original = diff.status === "added" ? "" : restoreOriginalFromPatch(current, diff.patch);
       const left = await vscode7.workspace.openTextDocument({ content: original });
       const right = exists ? vscode7.Uri.file(absolute) : (await vscode7.workspace.openTextDocument({ content: "" })).uri;
@@ -7919,26 +8303,24 @@ var ChatViewProvider = class {
   async handleRequest(msg) {
     if (msg.type === "ready") {
       this.historyGate.reset();
-      this.subagentSent.clear();
-      this.subagentForceFull = true;
     }
     await dispatchRequest(this, msg);
   }
   getHtml(webview) {
     const candidates = [
       // Packaged vsix layout.
-      path8.join(this.extensionUri.fsPath, "webview-dist", "index.html"),
+      path9.join(this.extensionUri.fsPath, "webview-dist", "index.html"),
       // Monorepo dev layout (F5 with extensionDevelopmentPath=packages/extension).
-      path8.join(this.extensionUri.fsPath, "..", "..", "webview", "dist", "index.html"),
+      path9.join(this.extensionUri.fsPath, "..", "..", "webview", "dist", "index.html"),
       // Legacy dev layout.
-      path8.join(
+      path9.join(
         vscode7.Uri.joinPath(this.extensionUri, "packages", "webview", "dist", "index.html").fsPath
       )
     ];
     for (const p of candidates) {
       try {
-        if (fs6.existsSync(p)) {
-          const raw = fs6.readFileSync(p, "utf8");
+        if (fs7.existsSync(p)) {
+          const raw = fs7.readFileSync(p, "utf8");
           const csp = `<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src ${webview.cspSource} 'unsafe-inline'; style-src ${webview.cspSource} 'unsafe-inline'; img-src ${webview.cspSource} data: blob: https://media.pollinations.ai; media-src https://media.pollinations.ai; font-src ${webview.cspSource} data:;">`;
           return raw.replace(/<head>/i, `<head>${csp}`);
         }
